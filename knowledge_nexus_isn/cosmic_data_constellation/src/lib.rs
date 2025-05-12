@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! Cosmic Data Constellation: Unified Meaning Framework for ISN.
 
 // Core decentralized knowledge graph logic.
 
-pub struct IsnNode { id: String, r#type: String, data: Vec<u8> }\npub fn create_isn_node(node_data: &[u8]) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub struct IsnNode { pub id: String, pub r#type: String, pub data: Vec<u8> }
+pub fn create_isn_node(node_data: &[u8]) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

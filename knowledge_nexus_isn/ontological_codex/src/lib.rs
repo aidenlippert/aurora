@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! Ontological Codex: Structuring Universal Knowledge in ISN.
 
 // Manages Prime Ontology Framework, Domain-Specific Codexes, Eternal Schema Vault.
 
-pub fn register_ontology_schema(schema_definition: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn validate_data_against_schema(data: &[u8], schema_id: &str) -> Result<bool, String> { Err("Not implemented".to_string()) }
+pub fn register_ontology_schema(schema_definition: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn validate_data_against_schema(data: &[u8], schema_id: &str) -> Result<bool, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

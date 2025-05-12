@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! Semantic Synapse Interfaces: Dynamic Interaction Layer for ISN.
 
 // Implements Quantum Query Portal and NovaTrigger Engines.
 
-pub fn query_isn(graphql_query: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn subscribe_to_nova_trigger(event_filter: &str, callback_module_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn query_isn(graphql_query: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn subscribe_to_nova_trigger(event_filter: &str, callback_module_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {
