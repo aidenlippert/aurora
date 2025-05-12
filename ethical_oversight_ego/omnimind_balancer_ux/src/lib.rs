@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! OmniMind Balancer: Ethical UX Harmonizer.
 
 // Logic for StarGuide Interfaces and Celestial Assist Oracles.
 
-pub fn get_starguide_ux_config(user_profile: &str, context: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn get_celestial_assist_prompt(user_action_history: &str) -> Result<Option<String>, String> { Err("Not implemented".to_string()) }
+pub fn get_starguide_ux_config(user_profile: &str, context: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn get_celestial_assist_prompt(user_action_history: &str) -> Result<Option<String>, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

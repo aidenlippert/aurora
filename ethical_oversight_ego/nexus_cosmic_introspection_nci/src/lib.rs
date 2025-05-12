@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! Nexus of Cosmic Introspection (NCI): Ethical Oversight Constellation.
 
 // Logic for IntegrityStar Reports and BiasGuard Sentinels.
 
-pub fn generate_integrity_star_report(system_component_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn detect_bias_with_biasguard(data_set_id: &str) -> Result<Option<String>, String> { Err("Not implemented".to_string()) }
+pub fn generate_integrity_star_report(system_component_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn detect_bias_with_biasguard(data_set_id: &str) -> Result<Option<String>, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {
