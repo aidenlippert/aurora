@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! VoidFootprint Design: Zero-Impact Infrastructure Principles/Logic.
 
 // Encapsulates logic for NebulaPulse Efficiency and TitanForge Opportunism evaluation.
 
-pub fn assess_nebula_pulse_device_efficiency(device_id: &str) -> Result<f32, String> { Err("Not implemented".to_string()) }\npub fn recommend_titanforge_eco_compute() -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn assess_nebula_pulse_device_efficiency(device_id: &str) -> Result<f32, String> { Err("Not implemented".to_string()) }
+pub fn recommend_titanforge_eco_compute() -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {
