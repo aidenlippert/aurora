@@ -5,11 +5,11 @@ use ecliptic_concordance::{Transaction as ConsensusTransaction, Block};
 
 use novavault_flux_finance::{FinancialOperationType as NovaVaultOpType, FinancialOperation}; // Aliased to avoid naming clash
 use celestial_synapse_network_csn as csn;
-use voidproof_engine_zkp::ZkProof; // ZkProof is used for Option<ZkProof> type hint
+ // ZkProof is used for Option<ZkProof> type hint
 
 // Governance imports
-use starsenate_collectives_governance::{Proposal, ProposalStatus, submit_proposal, cast_vote_on_proposal, tally_votes_and_decide};
-use oraclesync_futarchy; // We call functions on this module directly
+use starsenate_collectives_governance::{ProposalStatus, submit_proposal, cast_vote_on_proposal, tally_votes_and_decide};
+ // We call functions on this module directly
 
 use std::collections::HashMap;
 use sha2::{Sha256, Digest};

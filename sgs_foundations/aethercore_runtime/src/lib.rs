@@ -1,5 +1,8 @@
 #![allow(unused_variables, dead_code, unused_imports)]
 //! AetherCore Runtime: The Universal Wasm Execution Forge for Aurora.
+use std::collections::HashMap;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 #[derive(Debug)]
 pub struct ExecutionRequest {
@@ -17,54 +20,40 @@ pub struct ExecutionResult {
 }
 
 // Mock for currently "deployed" modules and their versions
-static mut ACTIVE_MODULES: Option<std::collections::HashMap<String, String>> = None;
-
-fn init_modules_db() {
-    unsafe {
-        if ACTIVE_MODULES.is_none() {
-            let mut initial_modules = std::collections::HashMap::new();
-            initial_modules.insert("mock_contract_v1".to_string(), "version_1.0.0".to_string());
-            ACTIVE_MODULES = Some(initial_modules);
-        }
-    }
-}
+static ACTIVE_MODULES: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| {
+    let mut initial_modules = HashMap::new();
+    initial_modules.insert("mock_contract_v1".to_string(), "version_1.0.0".to_string());
+    // Add other default/pre-deployed modules here if needed for simulation
+    initial_modules.insert("private_auc_handler_v1".to_string(), "version_1.0.0".to_string());
+    Mutex::new(initial_modules)
+});
 
 
 pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, String> {
-    init_modules_db();
     println!(
         "[AetherCore] Attempting to execute module '{}', function '{}' (mock)",
         request.module_id, request.function_name
     );
 
-    let current_version;
-    unsafe {
-        current_version = ACTIVE_MODULES.as_ref()
-            .and_then(|db| db.get(&request.module_id))
-            .cloned()
-            .unwrap_or_else(|| "unknown_version".to_string());
-    }
+    let active_modules_db = ACTIVE_MODULES.lock().unwrap();
+    let current_version = active_modules_db
+        .get(&request.module_id)
+        .cloned()
+        .unwrap_or_else(|| "unknown_version".to_string());
+    drop(active_modules_db); // Release lock early
+
     println!("[AetherCore] Executing module {} (Version: {})", request.module_id, current_version);
 
-
-    if request.module_id == "mock_contract_v1" {
-        if request.function_name == "process_payment" {
-            println!("[AetherCore] Mock 'process_payment' called with {} bytes of arguments.", request.arguments.len());
+    if request.module_id == "mock_contract_v1" || request.module_id == "private_auc_handler_v1" {
+        if request.function_name == "process_payment" || request.function_name == "log_private_op_intent" {
+            println!("[AetherCore] Mock function '{}' called with {} bytes of arguments.", request.function_name, request.arguments.len());
             Ok(ExecutionResult {
-                output: format!("Payment processed by {} (Version: {})", request.module_id, current_version).into_bytes(),
-                gas_used: 1000,
+                output: format!("{} processed by {} (Version: {})", request.function_name, request.module_id, current_version).into_bytes(),
+                gas_used: if request.function_name == "process_payment" { 1000 } else { 200 },
                 success: true,
-                logs: vec!["Log: Payment initiated.".to_string(), "Log: Balance checked (mock).".to_string()],
+                logs: vec![format!("Log: {} initiated.", request.function_name), "Log: Mock operation complete.".to_string()],
             })
-        } else if request.function_name == "log_private_op_intent" && current_version.starts_with("version_1.") {
-             Ok(ExecutionResult {
-                output: format!("Private op intent logged by {} (Version: {})", request.module_id, current_version).into_bytes(),
-                gas_used: 200,
-                success: true,
-                logs: vec!["Log: Private operation intent logged.".to_string()],
-            })
-        }
-        else {
+        } else {
             Err(format!("Unknown function '{}' in module '{}'", request.function_name, request.module_id))
         }
     } else {
@@ -73,37 +62,27 @@ pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, Stri
 }
 
 pub fn deploy_module(module_bytes: &[u8]) -> Result<String, String> {
-    init_modules_db();
     let module_id = format!("mod_{}", uuid::Uuid::new_v4());
     println!("[AetherCore] Deploying module ({} bytes), assigned ID: {} (mock)", module_bytes.len(), module_id);
-    unsafe {
-        if let Some(db) = ACTIVE_MODULES.as_mut() {
-            db.insert(module_id.clone(), "version_1.0.0".to_string()); // New modules start at v1
-        }
-    }
+    
+    let mut active_modules_db = ACTIVE_MODULES.lock().unwrap();
+    active_modules_db.insert(module_id.clone(), "version_1.0.0".to_string());
     Ok(module_id)
 }
 
 pub fn acknowledge_module_upgrade(module_id: &str, new_version_info: &str, changes_hash: &str) -> Result<(), String> {
-    init_modules_db();
     println!("[AetherCore] Acknowledging upgrade for module ID: '{}'. New version: '{}'. Changes hash: '{}' (mock).",
         module_id, new_version_info, changes_hash);
-    // In a real system, this would involve fetching the new Wasm, validating, and replacing the active version.
-    unsafe {
-        if let Some(db) = ACTIVE_MODULES.as_mut() {
-            if db.contains_key(module_id) {
-                db.insert(module_id.to_string(), new_version_info.to_string());
-                println!("[AetherCore] Module {} successfully upgraded to {} (mock).", module_id, new_version_info);
-                Ok(())
-            } else {
-                Err(format!("Module {} not found for upgrade.", module_id))
-            }
-        } else {
-             Err("Module DB not initialized".to_string())
-        }
+    
+    let mut active_modules_db = ACTIVE_MODULES.lock().unwrap();
+    if active_modules_db.contains_key(module_id) {
+        active_modules_db.insert(module_id.to_string(), new_version_info.to_string());
+        println!("[AetherCore] Module {} successfully upgraded to {} (mock).", module_id, new_version_info);
+        Ok(())
+    } else {
+        Err(format!("Module {} not found for upgrade.", module_id))
     }
 }
-
 
 pub fn status() -> &'static str {
     let crate_name = "aethercore_runtime";

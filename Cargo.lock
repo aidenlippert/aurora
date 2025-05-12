@@ -6,6 +6,7 @@ version = 4
 name = "aethercore_runtime"
 version = "0.1.0"
 dependencies = [
+ "once_cell",
  "uuid",
 ]
 
@@ -28,8 +29,10 @@ dependencies = [
  "hex",
  "nebula_pulse_swarm",
  "novavault_flux_finance",
+ "oraclesync_futarchy",
  "serde",
  "sha2",
+ "starsenate_collectives_governance",
  "voidproof_engine_zkp",
 ]
 
@@ -362,6 +365,12 @@ version = "0.1.0"
 [[package]]
 name = "starsenate_collectives_governance"
 version = "0.1.0"
+dependencies = [
+ "cosmic_data_constellation",
+ "once_cell",
+ "oraclesync_futarchy",
+ "uuid",
+]
 
 [[package]]
 name = "stellar_compression_arrays"
