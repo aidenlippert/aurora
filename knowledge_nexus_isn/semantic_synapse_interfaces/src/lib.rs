@@ -15,12 +15,14 @@ pub struct QueryResult {
 pub fn query_isn(query_string: &str) -> Result<QueryResult, String> {
     println!("[ISN_SSI_QueryPortal] Executing query: {} (mock)", query_string);
 
+    // Mock a simple graph query: "GET_LINKED_NODES_FOR {node_id} RELATIONSHIP {rel_type}"
     if query_string.starts_with("GET_LINKED_NODES_FOR") {
         let parts: Vec<&str> = query_string.split_whitespace().collect();
-        // Expecting "GET_LINKED_NODES_FOR <source_node_id> RELATIONSHIP <relationship_type>"
-        if parts.len() == 5 && parts[0] == "GET_LINKED_NODES_FOR" && parts[2] == "RELATIONSHIP" {
+        // Corrected parsing logic:
+        // parts[0]=GET_LINKED_NODES_FOR, parts[1]=<node_id>, parts[2]=RELATIONSHIP, parts[3]=<rel_type>
+        if parts.len() == 4 && parts[0] == "GET_LINKED_NODES_FOR" && parts[2] == "RELATIONSHIP" {
             let source_node_id = parts[1];
-            let relationship_type = parts[4];
+            let relationship_type = parts[3];
 
             println!("[ISN_SSI_QueryPortal] Graph Query: SourceNode='{}', Relationship='{}'", source_node_id, relationship_type);
 
@@ -28,24 +30,24 @@ pub fn query_isn(query_string: &str) -> Result<QueryResult, String> {
             let mut linked_nodes_data = Vec::new();
 
             for edge in edges {
-                // If the source_node_id is the 'from' node of the edge, the 'to' node is linked.
-                // (And vice-versa if we want bidirectional, but 'deployed_module' is likely one-way)
+                // For a "deployed_module" relationship, the developer DID is 'from', module deployment record is 'to'.
+                // So if source_node_id is the developer DID, we want the 'to_node_id'.
                 if edge.from_node_id == source_node_id && edge.relationship_type == relationship_type {
                     if let Some(node) = get_isn_node(&edge.to_node_id) {
-                        // Create a mini JSON object for each linked node for the mock result
                         linked_nodes_data.push(format!(
-                            "{{\"id\":\"{}\", \"type\":\"{}\", \"properties\":{:?}}}", // Using debug print for properties
+                            "{{\"id\":\"{}\", \"type\":\"{}\", \"properties\":{:?}}}",
                             node.id,
                             node.r#type,
                             node.properties 
                         ));
                     }
                 }
+                // Could also handle cases where source_node_id is the 'to_node_id' if relationship is bidirectional or queried differently
             }
             let json_array = format!("[{}]", linked_nodes_data.join(", "));
             return Ok(QueryResult { data_json: format!("{{\"data\": {{\"linked_nodes_via_{}\": {}}}}}", relationship_type, json_array) });
         } else {
-            return Ok(QueryResult { data_json: "{ \"data\": null, \"errors\": [\"Invalid graph query format\"] }".to_string() });
+            return Ok(QueryResult { data_json: "{ \"data\": null, \"errors\": [\"Invalid graph query format for GET_LINKED_NODES_FOR\"] }".to_string() });
         }
     }
     // Existing mock balance query
