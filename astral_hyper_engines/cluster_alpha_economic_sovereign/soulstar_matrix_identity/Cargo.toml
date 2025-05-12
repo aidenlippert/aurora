@@ -9,3 +9,4 @@ edition = "2021"
 uuid = { version = "1.8.0", features = ["v4"] }
 cosmic_data_constellation = { path = "../../../knowledge_nexus_isn/cosmic_data_constellation" }
  # Add dependencies here
+once_cell = "1.19.0"
