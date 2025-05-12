@@ -5,7 +5,6 @@ use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
-// Wasmi imports
 use wasmi::{Engine, Module, Store, Linker, Caller, TypedFunc, Instance, Extern, Value, AsContextMut, Error as WasmiError};
 
 #[derive(Debug, Clone)]
@@ -57,8 +56,8 @@ pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, Stri
     let module = Module::new(&engine, &module_info.wasm_bytecode[..])
         .map_err(|e| format!("Failed to parse Wasm module: {}", e))?;
     
-    let mut linker = Linker::new(&engine);
-    let mut host_state = HostState { module_id_for_log: request.module_id.clone(), ..Default::default() };
+    let linker = Linker::new(&engine); // Removed mut
+    let host_state = HostState { module_id_for_log: request.module_id.clone(), ..Default::default() }; // Removed mut
     let mut store = Store::new(&engine, host_state);
 
     let instance = linker.instantiate(&mut store, &module)
@@ -86,9 +85,8 @@ pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, Stri
             })
         }
         Err(wasmi_error) => {
-            let _host_state_after_call = store.into_data(); // Logs in host_state might be lost or partial on trap
+            let _host_state_after_call = store.into_data();
             eprintln!("[AetherCore] Wasm execution TRAP/Error for '{}': {:?}", request.module_id, wasmi_error);
-            // Use the Debug representation of the WasmiError enum itself
             let error_message = format!("Wasm Execution Error: {:?}", wasmi_error);
             Err(error_message)
         }
