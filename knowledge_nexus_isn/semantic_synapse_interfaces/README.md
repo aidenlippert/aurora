@@ -1,1 +1,1 @@
-Provides APIs (Quantum Query Portal) and event-driven automation (NovaTrigger Engines) for ISN.
+Semantic Synapse Interfaces: Dynamic Interaction Layer for ISN.

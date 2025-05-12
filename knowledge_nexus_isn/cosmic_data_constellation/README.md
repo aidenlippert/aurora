@@ -1,1 +1,1 @@
-The decentralized knowledge graph that unifies entities and relationships across Aurora.
+Cosmic Data Constellation: Unified Meaning Framework for ISN.
