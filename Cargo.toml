@@ -1,0 +1,96 @@
+[workspace]
+resolver = "2"
+members = [
+    # SGS Foundations
+    "sgs_foundations/aethercore_runtime",
+    "sgs_foundations/triad_web/nebula_pulse_swarm",
+    "sgs_foundations/triad_web/graviton_edge",
+    "sgs_foundations/triad_web/titanforge_grid",
+    "sgs_foundations/ecliptic_concordance",
+    "sgs_foundations/stellar_compression_arrays",
+    "sgs_foundations/celestial_synapse_network_csn",
+
+    # Omni-Verse Reality Simulation
+    "omniverse_reality_simulation/eonmirror_interface",
+    "omniverse_reality_simulation/chronoforge_simulator",
+
+    # Knowledge Nexus ISN
+    "knowledge_nexus_isn/cosmic_data_constellation",
+    "knowledge_nexus_isn/ontological_codex",
+    "knowledge_nexus_isn/distributed_cosmic_memory",
+    "knowledge_nexus_isn/semantic_synapse_interfaces",
+
+    # Astral Hyper Engines - Cluster Alpha
+    "astral_hyper_engines/cluster_alpha_economic_sovereign/novavault_flux_finance",
+    "astral_hyper_engines/cluster_alpha_economic_sovereign/starsenate_collectives_governance",
+    "astral_hyper_engines/cluster_alpha_economic_sovereign/soulstar_matrix_identity",
+    # Astral Hyper Engines - Cluster Beta
+    "astral_hyper_engines/cluster_beta_material_ecological/omnitrace_continuum",
+    "astral_hyper_engines/cluster_beta_material_ecological/astrogrid_nexus",
+    "astral_hyper_engines/cluster_beta_material_ecological/gaiapulse_engine",
+    "astral_hyper_engines/cluster_beta_material_ecological/voidstar_navigator",
+    # Astral Hyper Engines - Cluster Gamma
+    "astral_hyper_engines/cluster_gamma_human_empowerment/vitacore_sanctuary",
+    "astral_hyper_engines/cluster_gamma_human_empowerment/novalore_academy",
+    "astral_hyper_engines/cluster_gamma_human_empowerment/impactnova_catalyst",
+    # Astral Hyper Engines - Cluster Delta
+    "astral_hyper_engines/cluster_delta_creativity_truth/etherweb_matrix",
+    "astral_hyper_engines/cluster_delta_creativity_truth/creationverse_forge",
+    "astral_hyper_engines/cluster_delta_creativity_truth/truthforge_collective",
+    "astral_hyper_engines/cluster_delta_creativity_truth/veritasbeacon_network",
+    # Astral Hyper Engines - Cluster Epsilon
+    "astral_hyper_engines/cluster_epsilon_frontier_interfaces/neurosync_continuum",
+
+    # Security & Privacy Aegis
+    "security_privacy_aegis/voidproof_engine_zkp",
+    "security_privacy_aegis/nebulakey_shards_mpc",
+    "security_privacy_aegis/neurosync_sanctum_privacy",
+    "security_privacy_aegis/cosmic_justice_enforcers",
+
+    # Governance & Economy
+    "governance_economy/oraclesync_futarchy",
+    "governance_economy/econova_incentives",
+    "governance_economy/universal_flux_share",
+    "governance_economy/cosmic_flux_regulator",
+
+    # Ecological Synergy
+    "ecological_synergy/voidfootprint_design",
+    "ecological_synergy/ecoholo_badges_carbon_sentinels",
+    "ecological_synergy/novacarbon_markets",
+
+    # Developer Ecosystem AstroForge
+    "developer_ecosystem_astroforge/nebulacode_forge_sdk",
+    "developer_ecosystem_astroforge/astrocli_deployment_nexus",
+    "developer_ecosystem_astroforge/starforge_grants",
+    "developer_ecosystem_astroforge/cosmic_knowledge_nexus_community",
+
+    # Trust & Obligation STL & VON
+    "trust_obligation_stl_von/symbiotic_trust_lattice_stl",
+    "trust_obligation_stl_von/verifiable_obligation_nexus_von",
+
+    # Ethical Oversight EGO
+    "ethical_oversight_ego/primeaxiom_vault",
+    "ethical_oversight_ego/nexus_cosmic_introspection_nci",
+    "ethical_oversight_ego/evolutionverse_crucible",
+    "ethical_oversight_ego/omnimind_balancer_ux",
+
+    # Synergy Strategies Adoption
+    "synergy_strategies_adoption/interrealm_nexus_bridges",
+    "synergy_strategies_adoption/cosmic_outreach_lattice",
+    "synergy_strategies_adoption/voidinclusion_initiatives",
+    "synergy_strategies_adoption/interstellar_expansion_vectors",
+
+    # Risk Mitigation
+    "risk_mitigation/nebulashield_defenses",
+    "risk_mitigation/stellarrisk_balancer_economic",
+    "risk_mitigation/governancesafe_mechanisms",
+    "risk_mitigation/ecoresilience_strategies",
+]
+
+# Default build profile for release - optimize for size and speed
+[profile.release]
+lto = true            # Enable Link Time Optimization
+codegen-units = 1     # Maximize optimizations
+panic = "abort"       # Abort on panic for smaller binaries
+strip = true          # Strip symbols from binary
+opt-level = "z"       # Optimize for size ("s" is also good, "z" is more aggressive)
