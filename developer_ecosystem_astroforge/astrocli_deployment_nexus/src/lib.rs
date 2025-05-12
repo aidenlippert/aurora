@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use aethercore_runtime::{deploy_module as aethercore_deploy_module}; // Alias to avoid conflict
 use starforge_grants::approve_deployment_request;
-use cosmic_data_constellation::{IsnNode, record_module_deployment}; // Assuming new ISN function
+use cosmic_data_constellation::{IsnNode, record_module_deployment};
 
 pub struct MockDappCompilation {
     pub dapp_name: String,
@@ -22,7 +22,6 @@ pub struct DeploymentRequest {
 pub fn compile_dapp_mock(source_code_path: &str, developer_did: &str) -> Result<MockDappCompilation, String> {
     let dapp_name = source_code_path.split('/').last().unwrap_or("unknown_dapp").replace(".rs", "");
     println!("[AstroCLI] Compiling DApp '{}' for developer DID '{}' (mock).", dapp_name, developer_did);
-    // Simulate hashing of compiled code
     let mock_hash = format!("hash_of_compiled_{}_{}", dapp_name, uuid::Uuid::new_v4().to_string().split('-').next().unwrap());
     Ok(MockDappCompilation {
         dapp_name,
@@ -40,7 +39,6 @@ pub fn request_dapp_deployment(
     println!("[AstroCLI] Requesting deployment for DApp '{}' (Hash: {}), Request ID: {}. Target: {}",
         compilation_output.dapp_name, compilation_output.mock_wasm_bytecode_hash, request_id, target_info);
 
-    // Step 1: Mock approval from StarForge Grants (or simplified governance)
     if !approve_deployment_request(&request_id, &compilation_output.developer_did, &compilation_output.dapp_name) {
         let msg = format!("[AstroCLI] Deployment request '{}' for DApp '{}' REJECTED by StarForge/Governance.", request_id, compilation_output.dapp_name);
         println!("{}", msg);
@@ -48,20 +46,22 @@ pub fn request_dapp_deployment(
     }
     println!("[AstroCLI] Deployment request '{}' for DApp '{}' APPROVED.", request_id, compilation_output.dapp_name);
 
-    // Step 2: "Deploy" to AetherCore Runtime
-    // We pass the dapp_name as the conceptual module_id for this mock.
-    // A real deploy_module would take bytecode. Here we pass the hash and name for AetherCore to "register".
-    match aethercore_deploy_module(&compilation_output.dapp_name, &compilation_output.mock_wasm_bytecode_hash, "version_1.0.0_new") {
+    match aethercore_deploy_module(
+        &compilation_output.dapp_name,
+        &compilation_output.mock_wasm_bytecode_hash,
+        "version_1.0.0_new",
+        "new_sample_dapp" // Added behavior tag for the new DApp
+    ) {
         Ok(deployed_module_id) => {
             println!("[AstroCLI] DApp '{}' successfully deployed to AetherCore. Module ID: {}",
                 compilation_output.dapp_name, deployed_module_id);
 
-            // Step 3: Record deployment in ISN
             let mut details = HashMap::new();
             details.insert("developer_did".to_string(), compilation_output.developer_did);
             details.insert("wasm_bytecode_hash".to_string(), compilation_output.mock_wasm_bytecode_hash);
             details.insert("deployment_target".to_string(), target_info.to_string());
             details.insert("version".to_string(), "1.0.0_new".to_string());
+            details.insert("behavior_tag".to_string(), "new_sample_dapp".to_string());
 
 
             match record_module_deployment(&deployed_module_id, &compilation_output.dapp_name, current_block_height, details) {
