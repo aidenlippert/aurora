@@ -1,9 +1,9 @@
 #![allow(unused_variables, dead_code, unused_imports)]
 //! Semantic Synapse Interfaces: APIs for interacting with ISN.
-use cosmic_data_constellation::{get_isn_node, get_edges_from_node, IsnNode, IsnEdge}; // Import new functions and types
+use cosmic_data_constellation::{get_isn_node, get_edges_from_node, IsnNode, IsnEdge};
 
 #[derive(Debug)]
-pub struct GraphQLQuery { // Kept for structure, but query_isn will parse string directly
+pub struct GraphQLQuery {
     pub query_string: String,
 }
 
@@ -15,31 +15,37 @@ pub struct QueryResult {
 pub fn query_isn(query_string: &str) -> Result<QueryResult, String> {
     println!("[ISN_SSI_QueryPortal] Executing query: {} (mock)", query_string);
 
-    // Mock a simple graph query: "GET_LINKED_NODES_FOR {node_id} RELATIONSHIP {rel_type}"
     if query_string.starts_with("GET_LINKED_NODES_FOR") {
         let parts: Vec<&str> = query_string.split_whitespace().collect();
-        if parts.len() >= 5 && parts[3] == "RELATIONSHIP" {
-            let source_node_id = parts[3-1]; // GET_LINKED_NODES_FOR <node_id>
+        // Expecting "GET_LINKED_NODES_FOR <source_node_id> RELATIONSHIP <relationship_type>"
+        if parts.len() == 5 && parts[0] == "GET_LINKED_NODES_FOR" && parts[2] == "RELATIONSHIP" {
+            let source_node_id = parts[1];
             let relationship_type = parts[4];
 
-            let mut linked_node_ids = Vec::new();
+            println!("[ISN_SSI_QueryPortal] Graph Query: SourceNode='{}', Relationship='{}'", source_node_id, relationship_type);
+
             let edges = get_edges_from_node(source_node_id, Some(relationship_type));
+            let mut linked_nodes_data = Vec::new();
+
             for edge in edges {
-                if edge.from_node_id == source_node_id {
-                    linked_node_ids.push(edge.to_node_id);
-                } else if edge.to_node_id == source_node_id { // Also consider incoming links
-                    linked_node_ids.push(edge.from_node_id);
+                // If the source_node_id is the 'from' node of the edge, the 'to' node is linked.
+                // (And vice-versa if we want bidirectional, but 'deployed_module' is likely one-way)
+                if edge.from_node_id == source_node_id && edge.relationship_type == relationship_type {
+                    if let Some(node) = get_isn_node(&edge.to_node_id) {
+                        // Create a mini JSON object for each linked node for the mock result
+                        linked_nodes_data.push(format!(
+                            "{{\"id\":\"{}\", \"type\":\"{}\", \"properties\":{:?}}}", // Using debug print for properties
+                            node.id,
+                            node.r#type,
+                            node.properties 
+                        ));
+                    }
                 }
             }
-            // Fetch details of linked nodes (very basic for mock)
-            let mut results_data = Vec::new();
-            for linked_id in linked_node_ids {
-                if let Some(node) = get_isn_node(&linked_id) {
-                    results_data.push(format!("{{\"id\":\"{}\", \"type\":\"{}\"}}", node.id, node.r#type));
-                }
-            }
-            let json_array = format!("[{}]", results_data.join(","));
-            return Ok(QueryResult { data_json: format!("{{\"data\": {{\"linked_nodes\": {}}}}}", json_array) });
+            let json_array = format!("[{}]", linked_nodes_data.join(", "));
+            return Ok(QueryResult { data_json: format!("{{\"data\": {{\"linked_nodes_via_{}\": {}}}}}", relationship_type, json_array) });
+        } else {
+            return Ok(QueryResult { data_json: "{ \"data\": null, \"errors\": [\"Invalid graph query format\"] }".to_string() });
         }
     }
     // Existing mock balance query
