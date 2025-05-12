@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+hex = "0.4"
+sha2 = "0.10"
 uuid = { version = "1.8.0", features = ["v4"] }
 cosmic_data_constellation = { path = "../../knowledge_nexus_isn/cosmic_data_constellation" }
 starforge_grants = { path = "../starforge_grants" }

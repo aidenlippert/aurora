@@ -13,6 +13,12 @@ dependencies = [
 [[package]]
 name = "astrocli_deployment_nexus"
 version = "0.1.0"
+dependencies = [
+ "aethercore_runtime",
+ "cosmic_data_constellation",
+ "starforge_grants",
+ "uuid",
+]
 
 [[package]]
 name = "astrogrid_nexus"
@@ -23,6 +29,7 @@ name = "aurora_simulation_runner"
 version = "0.1.0"
 dependencies = [
  "aethercore_runtime",
+ "astrocli_deployment_nexus",
  "celestial_synapse_network_csn",
  "cosmic_data_constellation",
  "ecliptic_concordance",
