@@ -22,10 +22,12 @@ name = "aurora_simulation_runner"
 version = "0.1.0"
 dependencies = [
  "aethercore_runtime",
+ "celestial_synapse_network_csn",
  "cosmic_data_constellation",
  "ecliptic_concordance",
  "hex",
  "nebula_pulse_swarm",
+ "novavault_flux_finance",
  "serde",
  "sha2",
 ]
@@ -252,6 +254,12 @@ version = "0.1.0"
 [[package]]
 name = "novavault_flux_finance"
 version = "0.1.0"
+dependencies = [
+ "aethercore_runtime",
+ "cosmic_data_constellation",
+ "semantic_synapse_interfaces",
+ "uuid",
+]
 
 [[package]]
 name = "omnimind_balancer_ux"
