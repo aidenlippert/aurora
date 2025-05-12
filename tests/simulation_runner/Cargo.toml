@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+astrocli_deployment_nexus = { path = "../../developer_ecosystem_astroforge/astrocli_deployment_nexus" }
 econova_incentives = { path = "../../governance_economy/econova_incentives" }
 gaiapulse_engine = { path = "../../astral_hyper_engines/cluster_beta_material_ecological/gaiapulse_engine" }
 verifiable_obligation_nexus_von = { path = "../../trust_obligation_stl_von/verifiable_obligation_nexus_von" }

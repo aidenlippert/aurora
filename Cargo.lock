@@ -26,6 +26,8 @@ dependencies = [
  "celestial_synapse_network_csn",
  "cosmic_data_constellation",
  "ecliptic_concordance",
+ "econova_incentives",
+ "gaiapulse_engine",
  "hex",
  "nebula_pulse_swarm",
  "novavault_flux_finance",
@@ -145,6 +147,11 @@ version = "0.1.0"
 [[package]]
 name = "econova_incentives"
 version = "0.1.0"
+dependencies = [
+ "cosmic_data_constellation",
+ "novavault_flux_finance",
+ "uuid",
+]
 
 [[package]]
 name = "ecoresilience_strategies"
@@ -165,6 +172,9 @@ version = "0.1.0"
 [[package]]
 name = "gaiapulse_engine"
 version = "0.1.0"
+dependencies = [
+ "novacarbon_markets",
+]
 
 [[package]]
 name = "generic-array"
@@ -254,6 +264,11 @@ version = "0.1.0"
 [[package]]
 name = "novacarbon_markets"
 version = "0.1.0"
+dependencies = [
+ "cosmic_data_constellation",
+ "once_cell",
+ "uuid",
+]
 
 [[package]]
 name = "novalore_academy"
