@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! NovaVault Flux: Omni-Financial Continuum.
 
 // Handles PolyAsset Ledger, TrustBond Insuroverse, InterRealm Gateways.
 
-pub fn process_transaction(tx_details: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn create_trust_bond(obligation_details: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn process_transaction(tx_details: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn create_trust_bond(obligation_details: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

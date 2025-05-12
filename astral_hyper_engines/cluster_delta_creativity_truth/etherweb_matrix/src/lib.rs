@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! EtherWeb Matrix: Decentralized Data Cosmos (Content Storage).
 
 // Provides HoloStore Continuum, CensorShield Names, StarLink Streams.
 
-pub fn store_content_addressed_data(data: &[u8]) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn resolve_censorshield_name(name: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn store_content_addressed_data(data: &[u8]) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn resolve_censorshield_name(name: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! VoidStar Navigator: Interstellar Asset Command.
 
 // Manages space assets: Orbital Task Forge, Cosmic Freight Codex, DebrisVoid Sentinels.
 
-pub fn submit_orbital_task(task_spec: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn track_cosmic_freight(freight_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn submit_orbital_task(task_spec: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn track_cosmic_freight(freight_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

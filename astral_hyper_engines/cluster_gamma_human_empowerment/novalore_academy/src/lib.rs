@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! NovaLore Academy: Universal Knowledge Nexus (Education).
 
 // Issues MicroCred Holograms, runs MentorFlux Bazaar, forms Adaptive Lore Collectives.
 
-pub fn issue_micro_credential(skill_id: &str, user_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn list_mentorship_service(service_details: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn issue_micro_credential(skill_id: &str, user_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn list_mentorship_service(service_details: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

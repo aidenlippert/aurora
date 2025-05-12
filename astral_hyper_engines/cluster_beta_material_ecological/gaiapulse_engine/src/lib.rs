@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! GaiaPulse Engine: Planetary Eco-Regeneration Core.
 
 // Handles EcoFlux Markets, VerityCarbon Protocols, Pollution Nullifiers.
 
-pub fn trade_ecoflux_credit(trade_details: &str) -> Result<(), String> { Err("Not implemented".to_string()) }\npub fn verify_carbon_sequestration(proof_data: &[u8]) -> Result<bool, String> { Err("Not implemented".to_string()) }
+pub fn trade_ecoflux_credit(trade_details: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn verify_carbon_sequestration(proof_data: &[u8]) -> Result<bool, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

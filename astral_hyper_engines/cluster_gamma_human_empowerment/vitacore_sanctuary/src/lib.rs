@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! VitaCore Sanctuary: Sovereign Health Continuum.
 
 // Manages OmniHealth Vaults, ZeroTrust Gates, NeuralSync Insights (for medical AI).
 
-pub fn store_health_record(record_data: &[u8], user_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }\npub fn federated_medical_analysis(query: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn store_health_record(record_data: &[u8], user_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn federated_medical_analysis(query: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

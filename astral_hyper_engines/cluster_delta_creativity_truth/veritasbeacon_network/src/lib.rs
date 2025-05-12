@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! VeritasBeacon Network: Cosmic Truth Assurance.
 
 // Provides FactOracles, HoloNews Graph, TrustScore Badges (for news/info).
 
-pub fn verify_fact_claim(claim_data: &str) -> Result<bool, String> { Err("Not implemented".to_string()) }\npub fn get_trust_score_for_source(source_id: &str) -> Result<f32, String> { Err("Not implemented".to_string()) }
+pub fn verify_fact_claim(claim_data: &str) -> Result<bool, String> { Err("Not implemented".to_string()) }
+pub fn get_trust_score_for_source(source_id: &str) -> Result<f32, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

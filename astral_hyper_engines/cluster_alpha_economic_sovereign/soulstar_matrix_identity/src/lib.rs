@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! SoulStar Matrix: Sovereign Identity & Trust Constellation.
 
 // Manages Celestial ID Framework, Symbiotic Trust Lattice (STL), NebulaScore Continuum.
 
-pub fn create_celestial_id(user_info: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn update_trust_score(user_id: &str, context: &str, score_change: f64) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn create_celestial_id(user_info: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn update_trust_score(user_id: &str, context: &str, score_change: f64) -> Result<(), String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

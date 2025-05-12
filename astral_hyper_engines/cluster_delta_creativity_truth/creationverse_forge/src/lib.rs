@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! CreationVerse Forge: AI-Driven Artistic Nexus.
 
 // Manages NeuralArt Registry, Provenance HoloTokens, FluxRight Protocols.
 
-pub fn register_generative_ai_model(model_spec: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn mint_provenance_holotoken(artwork_id: &str, artist_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn register_generative_ai_model(model_spec: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn mint_provenance_holotoken(artwork_id: &str, artist_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

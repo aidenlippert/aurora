@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! NeuroSync Continuum: Neural Interface Sanctuary.
 
 // Manages MindVault Sanctums, ZeroMind Consent, Synaptic Learning Federation (for neural AI).
 
-pub fn store_encrypted_neural_data(data: &[u8], user_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }\npub fn request_zeromind_consent(user_id: &str, data_scope: &str) -> Result<bool, String> { Err("Not implemented".to_string()) }
+pub fn store_encrypted_neural_data(data: &[u8], user_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn request_zeromind_consent(user_id: &str, data_scope: &str) -> Result<bool, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

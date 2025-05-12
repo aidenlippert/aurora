@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! OmniTrace Continuum: Verifiable Asset Odyssey Engine.
 
 // Tracks assets with HoloTwin Tokens, EcoVirtue Metrics, NeuralPath Logistics.
 
-pub fn mint_holotwin_token(asset_details: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn get_ecovirtue_score(asset_id: &str) -> Result<f32, String> { Err("Not implemented".to_string()) }
+pub fn mint_holotwin_token(asset_details: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn get_ecovirtue_score(asset_id: &str) -> Result<f32, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {
