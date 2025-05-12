@@ -6,4 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+uuid = { version = "1.8.0", features = ["v4"] }
+cosmic_data_constellation = { path = "../../../../knowledge_nexus_isn/cosmic_data_constellation" }
  # Add dependencies here

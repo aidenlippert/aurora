@@ -75,6 +75,54 @@ pub fn record_governance_action(
     Ok(new_node)
 }
 
+pub fn record_identity_creation(
+    did: &str,
+    block_height: u64,
+    details: HashMap<String, String>,
+) -> Result<IsnNode, String> {
+    let node_id = format!("identity_{}", uuid::Uuid::new_v4());
+    let mut properties = details;
+    properties.insert("did".to_string(), did.to_string());
+
+    let new_node = IsnNode {
+        id: node_id.clone(),
+        r#type: "CelestialIdentity".to_string(),
+        properties,
+        created_at_block: block_height,
+    };
+    ISN_MOCK_DB.lock().unwrap().insert(node_id.clone(), new_node.clone());
+    println!(
+        "[ISN_CDC] Recorded identity creation. Node ID: {}, DID: {}, Block: {}",
+        new_node.id, did, block_height
+    );
+    Ok(new_node)
+}
+
+pub fn record_obligation_status(
+    obligation_id: &str,
+    status: &str, // e.g., "Pending", "Fulfilled", "Defaulted"
+    block_height: u64,
+    details: HashMap<String, String>,
+) -> Result<IsnNode, String> {
+    let node_id = format!("obligation_status_{}", uuid::Uuid::new_v4());
+    let mut properties = details;
+    properties.insert("obligation_id".to_string(), obligation_id.to_string());
+    properties.insert("status".to_string(), status.to_string());
+
+    let new_node = IsnNode {
+        id: node_id.clone(),
+        r#type: "VerifiableObligationStatus".to_string(),
+        properties,
+        created_at_block: block_height,
+    };
+    ISN_MOCK_DB.lock().unwrap().insert(node_id.clone(), new_node.clone());
+    println!(
+        "[ISN_CDC] Recorded obligation status. Node ID: {}, Obligation: {}, Status: {}, Block: {}",
+        new_node.id, obligation_id, status, block_height
+    );
+    Ok(new_node)
+}
+
 
 pub fn get_isn_node(node_id: &str) -> Option<IsnNode> {
     println!("[ISN_CDC] Attempting to get node {} (mock)", node_id);

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+verifiable_obligation_nexus_von = { path = "../../trust_obligation_stl_von/verifiable_obligation_nexus_von" }
+symbiotic_trust_lattice_stl = { path = "../../trust_obligation_stl_von/symbiotic_trust_lattice_stl" }
+soulstar_matrix_identity = { path = "../../astral_hyper_engines/cluster_alpha_economic_sovereign/soulstar_matrix_identity" }
 oraclesync_futarchy = { path = "../../governance_economy/oraclesync_futarchy" }
 starsenate_collectives_governance = { path = "../../astral_hyper_engines/cluster_alpha_economic_sovereign/starsenate_collectives_governance" }
 voidproof_engine_zkp = { path = "../../security_privacy_aegis/voidproof_engine_zkp" }
