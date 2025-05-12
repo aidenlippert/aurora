@@ -1,1 +1,1 @@
-The mobile/IoT device tier of Aurora's network, enabling hyper-local P2P communication.
+NebulaPulse Swarm: Sentient Mobile Vortex (Tier 1 Network).
