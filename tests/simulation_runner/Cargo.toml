@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+wasmi = "0.31.2"
 cosmic_justice_enforcers = { path = "../../security_privacy_aegis/cosmic_justice_enforcers" }
 nebulashield_defenses = { path = "../../risk_mitigation/nebulashield_defenses" }
 nexus_cosmic_introspection_nci = { path = "../../ethical_oversight_ego/nexus_cosmic_introspection_nci" }
