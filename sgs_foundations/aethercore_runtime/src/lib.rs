@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use wasmi::{
     Engine, Module, Store, Linker, Caller, Instance, Extern, Value, AsContextMut, Error as WasmiError,
-    Memory, MemoryType, Trap, TrapCode // Added Trap, TrapCode for explicit trapping
+    Memory, MemoryType, Trap, TrapCode // Ensured Trap and TrapCode are imported
 };
 
 #[derive(Debug, Clone)]
@@ -22,17 +22,16 @@ pub struct ExecutionRequest {
     pub module_id: String,
     pub function_name: String,
     pub arguments: Vec<Value>,
-    pub gas_limit: u64, // New field for gas limit
+    pub gas_limit: u64,
 }
 
 #[derive(Debug)]
 pub struct ExecutionResult {
     pub output_values: Vec<Value>,
-    pub gas_remaining: u64, // Changed from gas_used to gas_remaining
-    pub gas_consumed: u64,  // Explicitly state consumed gas
+    pub gas_consumed_total: u64, // Total gas (Wasm fuel + host function gas)
     pub success: bool,
     pub logs: Vec<String>,
-    pub error_message: Option<String>, // For trapping or other errors
+    pub error_message: Option<String>,
 }
 
 static ACTIVE_MODULES: Lazy<Mutex<HashMap<String, DeployedModuleInfo>>> = Lazy::new(|| {
@@ -54,37 +53,45 @@ static ACTIVE_MODULES: Lazy<Mutex<HashMap<String, DeployedModuleInfo>>> = Lazy::
 pub struct HostState {
     pub logs: Vec<String>,
     pub module_id_for_log: String,
-    pub gas_remaining: u64, // Gas tracking within host state for wasmi ticks
-    pub trap_message: Option<String>,
+    pub host_gas_remaining: u64, // Gas for host function execution
+    // Trap message for host function specific errors that should cause a Wasm trap
+    // This is a bit of a hack; ideally, host functions that can trap would return Result<_, Trap>
+    pub host_function_trap: Option<Trap>,
 }
 
 impl HostState {
-    fn consume_gas(&mut self, amount: u64) -> Result<(), Trap> {
-        if self.gas_remaining >= amount {
-            self.gas_remaining -= amount;
+    // Consumes gas specifically for host function operations
+    fn consume_host_gas(&mut self, amount: u64) -> Result<(), ()> { // Return empty error for simplicity
+        if self.host_gas_remaining >= amount {
+            self.host_gas_remaining -= amount;
             Ok(())
         } else {
-            self.gas_remaining = 0;
-            self.trap_message = Some("Out of gas".to_string());
-            println!("[HostState:Gas] Out of gas for module {}!", self.module_id_for_log);
-            Err(Trap::new(TrapCode::UnreachableCodeReached)) // Simulate out of gas with a trap
+            self.host_gas_remaining = 0;
+            println!("[HostState:Gas] Out of gas for host function in module {}!", self.module_id_for_log);
+            // Set a trap that will be checked after the host function returns to wasmi
+            self.host_function_trap = Some(Trap::new(TrapCode::UnreachableCodeReached)); // Generic trap for out of host gas
+            Err(())
         }
     }
 }
 
-
 fn host_log_message_adapter(mut caller: Caller<'_, HostState>, ptr: u32, len: u32) {
-    if caller.data_mut().consume_gas(5).is_err() { // Cost for host call
-        // Trap has already been set by consume_gas
+    // Consume gas for the host function call itself
+    if caller.data_mut().consume_host_gas(10).is_err() { // e.g., 10 gas units for a log call
+        // The trap is set in HostState, wasmi will pick it up after this host call returns.
+        // If a host function can trap, its signature in wasmi should be `-> Result<..., Trap>`
+        // but func_wrap makes it harder to propagate traps directly.
+        // This is a known complexity in wasmi's host function design.
         return;
     }
+
     let memory = match caller.get_export("memory") {
         Some(Extern::Memory(mem)) => mem,
-        _ => { caller.data_mut().trap_message = Some("Memory export not found for logging".to_string()); return; }
+        _ => { println!("[HostFuncError] 'memory' export not found for logging."); return; }
     };
     let mut buffer = vec![0u8; len as usize];
     if memory.read(&caller, ptr as usize, &mut buffer).is_err() {
-        caller.data_mut().trap_message = Some("Failed to read Wasm memory for logging".to_string()); return;
+        println!("[HostFuncError] Failed to read Wasm memory for logging."); return;
     }
     match String::from_utf8(buffer) {
         Ok(message_str) => {
@@ -92,123 +99,73 @@ fn host_log_message_adapter(mut caller: Caller<'_, HostState>, ptr: u32, len: u3
             println!("{}", log_entry);
             caller.data_mut().logs.push(log_entry);
         }
-        Err(_) => { caller.data_mut().trap_message = Some("Log message not valid UTF-8".to_string()); return; }
+        Err(_) => { println!("[HostFuncError] Log message not valid UTF-8."); return; }
     }
 }
 
 pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, String> {
     println!(
-        "[AetherCore] Attempting to execute Wasm module '{}', function '{}', Gas Limit: {}",
+        "[AetherCore] Executing module '{}', fn '{}', GasLimit: {}",
         request.module_id, request.function_name, request.gas_limit
     );
 
     let active_modules_db = ACTIVE_MODULES.lock().unwrap();
-    let module_info = match active_modules_db.get(&request.module_id) {
-        Some(info) => info.clone(),
-        None => return Err(format!("Module '{}' not found in AetherCore.", request.module_id)),
-    };
+    let module_info = active_modules_db.get(&request.module_id).cloned()
+        .ok_or_else(|| format!("Module '{}' not found.", request.module_id))?;
     drop(active_modules_db);
 
-    println!("[AetherCore] Executing module {} (Version: {})", request.module_id, module_info.version);
-
-    // --- Legacy Module Handling (Conceptual Gas) ---
-    if module_info.wasm_bytecode.is_empty() {
-        let mut gas_consumed_legacy = 0;
-        let mut logs_legacy = Vec::new();
-        let mut output_legacy = Vec::new();
-        let mut success_legacy = false;
-
-        if request.module_id == "mock_contract_v1" && request.function_name == "process_payment" {
-            gas_consumed_legacy = 1000; // Arbitrary gas for legacy
-            logs_legacy.push("Log: Legacy Payment initiated.".to_string());
-            output_legacy.push(Value::I64(gas_consumed_legacy as i64)); // Return gas for consistency
-            success_legacy = true;
-        } else if request.module_id == "private_auc_handler_v1" && request.function_name == "log_private_op_intent" {
-            gas_consumed_legacy = 200;
-            logs_legacy.push("Log: Legacy Private operation intent logged.".to_string());
-            output_legacy.push(Value::I64(gas_consumed_legacy as i64));
-            success_legacy = true;
-        } else {
-            return Err(format!("Unknown function or unexecutable legacy module '{}'", request.module_id));
+    if module_info.wasm_bytecode.is_empty() { // Legacy module handling
+        let (output, gas_consumed, success, logs) = match (request.module_id.as_str(), request.function_name.as_str()) {
+            ("mock_contract_v1", "process_payment") => (vec![Value::I64(1000)], 1000, true, vec!["Lgcy:PayInit".to_string()]),
+            ("private_auc_handler_v1", "log_private_op_intent") => (vec![Value::I64(200)], 200, true, vec!["Lgcy:PrivOpLog".to_string()]),
+            _ => return Err(format!("Unknown legacy fn {}::{}", request.module_id, request.function_name)),
+        };
+        if request.gas_limit < gas_consumed {
+            return Ok(ExecutionResult { output_values: Vec::new(), gas_consumed_total: request.gas_limit, success: false, logs, error_message: Some("Out of gas (legacy)".to_string()) });
         }
-
-        if request.gas_limit < gas_consumed_legacy {
-            return Ok(ExecutionResult {
-                output_values: Vec::new(), gas_remaining: 0, gas_consumed: request.gas_limit, // Consumed all limit
-                success: false, logs: logs_legacy, error_message: Some("Out of gas for legacy module".to_string()),
-            });
-        }
-        return Ok(ExecutionResult {
-            output_values: output_legacy, gas_remaining: request.gas_limit - gas_consumed_legacy,
-            gas_consumed: gas_consumed_legacy, success: success_legacy, logs: logs_legacy, error_message: None,
-        });
+        return Ok(ExecutionResult { output_values: output, gas_consumed_total: gas_consumed, success, logs, error_message: None });
     }
 
-    // --- Wasmi Execution with Gas ---
     let engine = Engine::default();
-    let module = Module::new(&engine, &module_info.wasm_bytecode[..]).map_err(|e| format!("Wasm parse error: {}", e))?;
+    let module = Module::new(&engine, &module_info.wasm_bytecode[..]).map_err(|e| format!("Wasm parse: {}", e))?;
     
     let mut linker = Linker::new(&engine);
-    linker.func_wrap("env", "host_log_message", host_log_message_adapter).map_err(|e| format!("Linker error: {}", e))?;
+    linker.func_wrap("env", "host_log_message", host_log_message_adapter).map_err(|e| format!("Linker: {}", e))?;
 
-    let mut host_state = HostState { module_id_for_log: request.module_id.clone(), gas_remaining: request.gas_limit, ..Default::default() };
+    let mut host_state = HostState { module_id_for_log: request.module_id.clone(), host_gas_remaining: request.gas_limit, ..Default::default() };
     let mut store = Store::new(&engine, host_state);
     
-    // Configure wasmi store for fuel/gas consumption (instruction counting)
-    store.add_fuel(request.gas_limit).map_err(|e| format!("Failed to set initial fuel: {:?}", e))?;
+    store.add_fuel(request.gas_limit).map_err(|e| format!("Set fuel: {:?}", e))?; // Set fuel for Wasm opcodes
 
-
-    let instance = linker.instantiate(&mut store, &module)
-        .and_then(|pre| pre.start(&mut store)) // .start consumes pre, so no need to drop manually
-        .map_err(|e| format!("Wasm instantiation error: {:?}", e))?;
-
-    let func = instance.get_func(&mut store, &request.function_name)
-        .ok_or_else(|| format!("Function '{}' not found in module '{}'", request.function_name, request.module_id))?;
+    let instance = linker.instantiate(&mut store, &module).and_then(|pre| pre.start(&mut store)).map_err(|e| format!("Wasm instantiate: {:?}", e))?;
+    let func = instance.get_func(&mut store, &request.function_name).ok_or_else(|| format!("Fn '{}' not found", request.function_name))?;
 
     let func_type = func.ty(&store);
-    let num_results = func_type.results().len();
-    let mut results_buffer = vec![Value::I32(0); num_results];
+    let mut results_buffer = vec![Value::I32(0); func_type.results().len()];
 
-    println!("[AetherCore] Invoking Wasm (fuel: {}) '{}' for '{}'", store.fuel_consumed().unwrap_or(0) + store.fuel_remaining(&engine).unwrap_or(0), request.function_name, request.module_id);
+    println!("[AetherCore] Invoking Wasm fn '{}' for '{}'", request.function_name, request.module_id);
 
-    let call_result = func.call(&mut store, &request.arguments, &mut results_buffer);
+    let call_outcome = func.call(&mut store, &request.arguments, &mut results_buffer);
     
-    let gas_consumed_by_wasmi = store.fuel_consumed().unwrap_or(0);
-    let final_host_state = store.into_data(); // Retrieve host state regardless of outcome
+    let wasm_fuel_consumed = store.fuel_consumed().unwrap_or(0);
+    let final_host_state = store.into_data(); // Retrieve host state
+    let host_gas_consumed = request.gas_limit.saturating_sub(final_host_state.host_gas_remaining); // Gas consumed by host functions
+    let total_gas_consumed = wasm_fuel_consumed + host_gas_consumed;
 
-    match call_result {
+    match call_outcome {
         Ok(()) => {
-            println!("[AetherCore] Wasm exec successful for '{}'. Results: {:?}. Gas consumed by wasmi: {}", request.module_id, results_buffer, gas_consumed_by_wasmi);
-            Ok(ExecutionResult {
-                output_values: results_buffer,
-                gas_remaining: final_host_state.gas_remaining, // This reflects host func gas
-                gas_consumed: gas_consumed_by_wasmi + (request.gas_limit - final_host_state.gas_remaining), // wasmi + host
-                success: true,
-                logs: final_host_state.logs,
-                error_message: None,
-            })
+            // Check if a host function set a trap
+            if let Some(trap) = final_host_state.host_function_trap {
+                eprintln!("[AetherCore] Host function trap for '{}': {:?}. Gas: {}", request.module_id, trap, total_gas_consumed);
+                return Ok(ExecutionResult { output_values: Vec::new(), gas_consumed_total: total_gas_consumed, success: false, logs: final_host_state.logs, error_message: Some(format!("Host function trap: {:?}", trap))});
+            }
+            println!("[AetherCore] Wasm exec OK for '{}'. Results: {:?}. TotalGas: {}", request.module_id, results_buffer, total_gas_consumed);
+            Ok(ExecutionResult { output_values: results_buffer, gas_consumed_total: total_gas_consumed, success: true, logs: final_host_state.logs, error_message: None })
         }
         Err(wasmi_error) => {
-            let mut total_gas_consumed = gas_consumed_by_wasmi + (request.gas_limit - final_host_state.gas_remaining);
-            let error_msg_str = final_host_state.trap_message.clone().unwrap_or_else(|| format!("Wasm Trap: {:?}", wasmi_error));
-             if matches!(wasmi_error, WasmiError::Trap(ref trap) if trap.trap_code() == Some(TrapCode::UnreachableCodeReached)) && final_host_state.trap_message.as_deref() == Some("Out of gas") {
-                 // If it's our specific out of gas trap from host function
-                 total_gas_consumed = request.gas_limit; // All gas limit consumed
-             } else if matches!(wasmi_error, WasmiError::Trap(ref trap) if trap.trap_code() == Some(TrapCode::OutOfFuel)) {
-                 // If it's wasmi's own OutOfFuel trap
-                 total_gas_consumed = request.gas_limit;
-             }
-
-
-            eprintln!("[AetherCore] Wasm execution TRAP/Error for '{}': {}. Gas consumed: {}", request.module_id, error_msg_str, total_gas_consumed);
-            Ok(ExecutionResult { // Return Ok with success: false for traps, as per many runtimes
-                output_values: Vec::new(),
-                gas_remaining: 0,
-                gas_consumed: total_gas_consumed,
-                success: false,
-                logs: final_host_state.logs,
-                error_message: Some(error_msg_str),
-            })
+            eprintln!("[AetherCore] Wasm TRAP/Error for '{}': {:?}. TotalGas: {}", request.module_id, wasmi_error, total_gas_consumed);
+            let error_message = final_host_state.host_function_trap.map(|t| format!("Host function trap: {:?}",t)).unwrap_or_else(|| format!("Wasm Error: {:?}", wasmi_error));
+            Ok(ExecutionResult { output_values: Vec::new(), gas_consumed_total: total_gas_consumed, success: false, logs: final_host_state.logs, error_message: Some(error_message) })
         }
     }
 }
