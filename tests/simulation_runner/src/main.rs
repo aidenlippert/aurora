@@ -12,7 +12,8 @@ use sha2::{Sha256, Digest};
 use hex;
 
 // Helper to create a mock hash of a struct (very basic)
-fn mock_hash_struct<T: std.fmt::Debug>(data: &T) -> String {
+// CORRECTED LINE: T: std::fmt::Debug
+fn mock_hash_struct<T: std::fmt::Debug>(data: &T) -> String {
     let mut hasher = Sha256::new();
     hasher.update(format!("{:?}", data).as_bytes());
     let result = hasher.finalize();
