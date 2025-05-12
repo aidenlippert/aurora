@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! StarForge Grants: Fueling Cosmic Creation.
 
 // Logic for Cosmic Knowledge Grants and NebulaHack Collectives management.
 
-pub fn apply_for_grant(proposal_id: &str, applicant_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }\npub fn manage_hackathon_bounty(hackathon_id: &str, winner_id: &str, amount: u64) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn apply_for_grant(proposal_id: &str, applicant_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn manage_hackathon_bounty(hackathon_id: &str, winner_id: &str, amount: u64) -> Result<(), String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

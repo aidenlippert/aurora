@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! AstroCLI & Deployment Nexus: Streamlined Creation Flow.
 
 // Core logic for AstroCLI commands and ProtoSim Sandboxes interaction (this could be a --bin crate eventually).
 
-pub fn execute_astro_command(command: &str, args: &[&str]) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn create_protosim_sandbox(config: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn execute_astro_command(command: &str, args: &[&str]) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn create_protosim_sandbox(config: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! NebulaCode Forge: Universal Developer SDK and Libraries.
 
 // Provides StarScript Libraries, VoidProof Toolchains, FluxClient SDK.
 
-pub fn get_starscript_library(name: &str) -> Option<Vec<u8>> { None }\npub fn compile_zkp_circuit_with_toolchain(circuit_code: &str) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }
+pub fn get_starscript_library(name: &str) -> Option<Vec<u8>> { None }
+pub fn compile_zkp_circuit_with_toolchain(circuit_code: &str) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {
