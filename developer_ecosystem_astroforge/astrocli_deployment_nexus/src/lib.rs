@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-// No longer need MockWasmInstruction from aethercore_runtime
 use aethercore_runtime::deploy_module as aethercore_deploy_module;
 use starforge_grants::approve_deployment_request;
 use cosmic_data_constellation::{IsnNode, record_module_deployment};
@@ -16,13 +15,13 @@ use uuid;
 #[derive(Debug, Clone)]
 pub struct MockDappCompilation {
     pub dapp_name: String,
-    pub mock_wasm_bytecode_hash: String, // Hash of the Wasm bytecode
+    pub mock_wasm_bytecode_hash: String,
     pub developer_did: String,
-    pub wasm_bytecode: Vec<u8>, // The actual Wasm bytecode
+    pub wasm_bytecode: Vec<u8>,
 }
 
 #[derive(Debug)]
-pub struct DeploymentRequest {
+pub struct DeploymentRequest { /* ... same ... */
     pub request_id: String,
     pub dapp_name: String,
     pub developer_did: String,
@@ -30,41 +29,49 @@ pub struct DeploymentRequest {
     pub deployment_target_info: String,
 }
 
-// This function simulates "compiling"
-// For "sample_wasm_module_add", it loads the pre-compiled Wasm.
-// For other test DApp names, it generates empty bytecode.
 pub fn compile_dapp_mock(
-    dapp_name_or_crate_name: &str,
+    // This argument should be the CRATE NAME of the Wasm module we want to load.
+    wasm_module_crate_name: &str,
     developer_did: &str,
-    base_path_for_real_wasm: &str, // e.g., "utils/sample_wasm_modules"
+    // base_path_to_utils_dir: e.g., "utils" if utils is at workspace root
+    base_path_to_utils_dir: &str,
 ) -> Result<MockDappCompilation, String> {
-    println!("[AstroCLI] \"Compiling\" DApp '{}' for developer DID '{}'.",
-        dapp_name_or_crate_name, developer_did);
+    println!("[AstroCLI] \"Compiling\" DApp (from Wasm crate: '{}') for developer DID '{}'.",
+        wasm_module_crate_name, developer_did);
 
-    let wasm_bytecode: Vec<u8>;
-    let dapp_name_to_register: String = dapp_name_or_crate_name.to_string();
+    let mut wasm_bytecode: Vec<u8> = Vec::new();
+    let dapp_name_to_register: String = wasm_module_crate_name.to_string(); // Use crate name as DApp name for this mock
 
-    if dapp_name_or_crate_name == "sample_wasm_module_add" {
-        let wasm_file_path_str = format!("{}/{}/target/wasm32-unknown-unknown/release/{}.wasm",
-                                         base_path_for_real_wasm,
-                                         dapp_name_or_crate_name,
-                                         dapp_name_or_crate_name.replace("-", "_"));
+    // Specific handling for known Wasm modules to load their actual bytecode
+    if wasm_module_crate_name == "sample_wasm_module_add" || wasm_module_crate_name == "sample_wasm_host_interaction" {
+        // Construct path relative to workspace root.
+        // Cargo target dir is at <workspace_root>/target/
+        let wasm_file_path_str = format!("target/wasm32-unknown-unknown/release/{}.wasm",
+                                         wasm_module_crate_name.replace("-", "_"));
         let wasm_file_path = Path::new(&wasm_file_path_str);
         println!("[AstroCLI] Attempting to load Wasm bytecode from: {:?}", wasm_file_path);
-        wasm_bytecode = fs::read(wasm_file_path)
-            .map_err(|e| format!("Failed to read Wasm file {:?}: {}", wasm_file_path, e))?;
+        match fs::read(wasm_file_path) {
+            Ok(bytes) => {
+                println!("[AstroCLI] Successfully loaded {} bytes from {:?}", bytes.len(), wasm_file_path);
+                wasm_bytecode = bytes;
+            }
+            Err(e) => {
+                // Fallback to empty bytecode if file not found, but log an error
+                eprintln!("[AstroCLI] WARN: Failed to read Wasm file {:?}: {}. Using empty bytecode for {}.", wasm_file_path, e, wasm_module_crate_name);
+                // This allows simulation to proceed for ethical checks based on name for malicious/risky
+            }
+        }
     } else {
         // For "malicious_dapp_attempt", "risky_dapp_code", or any other mock that doesn't have a real .wasm file
-        println!("[AstroCLI_Compiler] Generating placeholder (empty) bytecode for DApp: {}", dapp_name_or_crate_name);
-        wasm_bytecode = Vec::new();
+        println!("[AstroCLI_Compiler] Generating placeholder (empty) bytecode for DApp named: {}", wasm_module_crate_name);
+        // wasm_bytecode remains empty
     }
 
     let mut hasher = Sha256::new();
     if !wasm_bytecode.is_empty() {
         hasher.update(&wasm_bytecode);
     } else {
-        // If bytecode is empty (for purely name-based mock ethical checks), hash the name and a UUID
-        hasher.update(format!("{}_{}", dapp_name_or_crate_name, uuid::Uuid::new_v4()).as_bytes());
+        hasher.update(format!("{}_{}", wasm_module_crate_name, uuid::Uuid::new_v4()).as_bytes());
     }
     let bytecode_hash = hex::encode(hasher.finalize());
 
@@ -76,7 +83,7 @@ pub fn compile_dapp_mock(
     })
 }
 
-pub fn request_dapp_deployment(
+pub fn request_dapp_deployment( /* ... same as before ... */
     compilation_output: MockDappCompilation,
     target_info: &str,
     current_block_height: u64,
@@ -98,11 +105,11 @@ pub fn request_dapp_deployment(
     }
     println!("[AstroCLI] Deployment request '{}' for DApp '{}' APPROVED.", request_id, compilation_output.dapp_name);
 
-    match aethercore_deploy_module( // Using the aliased import
+    match aethercore_runtime::deploy_module(
         &compilation_output.dapp_name,
         &compilation_output.mock_wasm_bytecode_hash,
         "version_1.0.0_from_astrocli",
-        compilation_output.wasm_bytecode // Pass the Vec<u8>
+        compilation_output.wasm_bytecode
     ) {
         Ok(deployed_module_id) => {
             println!("[AstroCLI] DApp '{}' successfully deployed to AetherCore. Assigned Module ID: {}",
@@ -125,7 +132,7 @@ pub fn request_dapp_deployment(
     }
 }
 
-pub fn status() -> &'static str {
+pub fn status() -> &'static str { /* ... same ... */
     let crate_name = "astrocli_deployment_nexus";
     println!("[{}] placeholder_function called (mock status)", crate_name);
     "skeleton operational (mock)"

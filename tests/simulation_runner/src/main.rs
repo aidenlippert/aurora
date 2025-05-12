@@ -9,13 +9,15 @@ use verifiable_obligation_nexus_von as von;
 use gaiapulse_engine::process_green_operation_attestation;
 use econova_incentives::calculate_and_distribute_fluxboost_reward;
 use astrocli_deployment_nexus::{compile_dapp_mock, request_dapp_deployment, MockDappCompilation};
-use primeaxiom_vault::CodeToCheck;
+// Unused imports to be cleaned by cargo fix or manually
+// use primeaxiom_vault::CodeToCheck;
+// use nebulashield_defenses::AnomalyType;
 use nexus_cosmic_introspection_nci::generate_integrity_report;
 use nebulashield_defenses::OperationTrace;
 use cosmic_justice_enforcers::MisbehaviorType;
-
 use eonmirror_interface::{ingest_real_world_data, RealWorldDataPoint};
-use chronoforge_simulator::{generate_prediction_from_isn_data, Prediction};
+use chronoforge_simulator::generate_prediction_from_isn_data;
+// use chronoforge_simulator::Prediction; // Not used by name
 use gaiapulse_engine::react_to_environmental_prediction;
 
 use wasmi::Value;
@@ -111,18 +113,22 @@ fn run_ecological_simulation_phase(green_validator_did: &str, block_height: u64)
 
 fn run_developer_deployment_phase(developer_did: &str, block_height: u64, wasm_module_crate_name: &str) {
     println!("\n--- Running Developer Deployment Simulation Phase for DID {} (Wasm Crate: {}) ---", developer_did, wasm_module_crate_name);
-    let wasm_base_path = "utils/sample_wasm_modules";
-    let compilation_output: MockDappCompilation = match compile_dapp_mock(wasm_module_crate_name, developer_did, wasm_base_path) {
-        Ok(comp) => comp, Err(e) => { eprintln!("[DevSim] DApp Wasm loading/compilation failed for '{}': {}", wasm_module_crate_name, e); return; }
+    
+    // AstroCLI compile_dapp_mock now takes the crate name and constructs the path to its Wasm output
+    // The "" for base_path_to_utils_dir is okay as compile_dapp_mock now builds "target/..." from workspace root.
+    let compilation_output: MockDappCompilation = match compile_dapp_mock(wasm_module_crate_name, developer_did, "") {
+        Ok(comp) => comp,
+        Err(e) => { eprintln!("[DevSim] DApp Wasm loading/compilation failed for '{}': {}", wasm_module_crate_name, e); return; }
     };
     println!("  -> AstroCLI: DApp '{}' (from crate {}) \"compiled\". Wasm Bytecode Hash: {}. Bytecode size: {}",
         compilation_output.dapp_name, wasm_module_crate_name, compilation_output.mock_wasm_bytecode_hash, compilation_output.wasm_bytecode.len());
-    match request_dapp_deployment(compilation_output.clone(), "AetherCore_Target", block_height) {
+
+    let deployment_target = "AetherCore_Target"; // Corrected target name
+    match request_dapp_deployment(compilation_output.clone(), deployment_target, block_height) {
         Ok(deployed_module_id) => {
             println!("  -> AstroCLI: DApp '{}' deployment successful. Deployed (AetherCore) Module ID: '{}'", compilation_output.dapp_name, deployed_module_id);
             stl::update_trust_score(developer_did, stl::GOVERNANCE_CONTEXT, 0.1, &format!("Successfully deployed DApp: {}", compilation_output.dapp_name));
 
-            // Test execution for specific deployed DApps
             if deployed_module_id == "sample_wasm_module_add" {
                 println!("\n  --- Attempting to execute Wasm DApp '{}' (function: add) ---", deployed_module_id);
                 let exec_req = ExecutionRequest { module_id: deployed_module_id, function_name: "add".to_string(), arguments: vec![Value::I32(700), Value::I32(52)] };
@@ -202,22 +208,20 @@ fn main() {
     all_dids_for_stl_strings.iter().for_each(|did_str| stl::initialize_entity_trust(did_str));
 
     run_financial_simulation_phase(&user_punk_did, get_next_mock_block_height());
-    run_governance_simulation_phase(&dev_aurora_did, other_voters.clone(), get_next_mock_block_height()); // Pass Vec<&str>
+    run_governance_simulation_phase(&dev_aurora_did, other_voters.clone(), get_next_mock_block_height());
     run_von_simulation_phase(&user_punk_did, &obligee_did_str, get_next_mock_block_height());
     run_ecological_simulation_phase(&voter_alpha_did, get_next_mock_block_height());
-    
-    // Deploy the actual sample Wasm modules
     run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "sample_wasm_module_add");
     run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "sample_wasm_host_interaction");
-    
     run_reality_sync_prediction_phase(&voter_alpha_did, get_next_mock_block_height());
     run_risk_ethics_simulation_phase(&malicious_dev_did, &risky_dev_did, "sample_wasm_module_add", get_next_mock_block_height());
 
     println!("\n--- Final Mock STL Scores ---");
-    // Add the zone_a_guardian_did to the list for printing its score too.
     let zone_a_guardian_did = "did:aurora:eco_guardian_zone_a";
-    stl::initialize_entity_trust(zone_a_guardian_did); // Ensure it's initialized
-    all_dids_for_stl_strings.push(zone_a_guardian_did.to_string()); // Add to the list for printing
+    if !all_dids_for_stl_strings.contains(&zone_a_guardian_did.to_string()) { // ensure not to add duplicates if already somehow there
+        all_dids_for_stl_strings.push(zone_a_guardian_did.to_string());
+        stl::initialize_entity_trust(zone_a_guardian_did);
+    }
 
     for did_str_owned in all_dids_for_stl_strings.iter() {
         println!("  DID: {}, Gov: {:.2}, Fin: {:.2}", did_str_owned,
