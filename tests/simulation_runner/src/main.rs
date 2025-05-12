@@ -6,20 +6,18 @@ use starsenate_collectives_governance::{ProposalStatus, submit_proposal, cast_vo
 use soulstar_matrix_identity::create_celestial_id;
 use symbiotic_trust_lattice_stl as stl;
 use verifiable_obligation_nexus_von as von;
-use gaiapulse_engine::process_green_operation_attestation; // Keep this
+use gaiapulse_engine::process_green_operation_attestation; // Used
 use econova_incentives::calculate_and_distribute_fluxboost_reward;
 use astrocli_deployment_nexus::{compile_dapp_mock, request_dapp_deployment, MockDappCompilation};
-use primeaxiom_vault::CodeToCheck;
+// primeaxiom_vault::CodeToCheck is not directly used by name, functions are called via module
 use nexus_cosmic_introspection_nci::generate_integrity_report;
-use nebulashield_defenses::{OperationTrace, AnomalyType};
-use cosmic_justice_enforcers::MisbehaviorType;
+use nebulashield_defenses::OperationTrace; // AnomalyType not directly named
+use cosmic_justice_enforcers::MisbehaviorType; // apply_penalty_for_misbehavior called via module
 
-// New imports for Reality Sync & Prediction
-use omniverse_reality_simulation::eonmirror_interface::{ingest_real_world_data, RealWorldDataPoint};
-use omniverse_reality_simulation::chronoforge_simulator::{generate_prediction_from_isn_data, Prediction};
-// Import a function from gaiapulse_engine to react to prediction
-use gaiapulse_engine::react_to_environmental_prediction;
-
+// Corrected imports for Reality Sync & Prediction
+use eonmirror_interface::{ingest_real_world_data, RealWorldDataPoint};
+use chronoforge_simulator::{generate_prediction_from_isn_data, Prediction};
+use gaiapulse_engine::react_to_environmental_prediction; // Already imported but good to have here for clarity
 
 use wasmi::Value;
 use std::collections::HashMap;
@@ -111,7 +109,7 @@ fn run_ecological_simulation_phase(green_validator_did: &str, block_height: u64)
     let op_id_for_reward = format!("block_proposal_{}", block_height);
     if let Ok(Some(boost)) = calculate_and_distribute_fluxboost_reward(green_validator_did, 100, &op_id_for_reward, block_height) { println!("  -> EcoNova: FluxBoost of {} distributed.", boost); }
 }
-fn run_developer_deployment_phase(developer_did: &str, block_height: u64, wasm_module_crate_name: &str) { /* Modified */
+fn run_developer_deployment_phase(developer_did: &str, block_height: u64, wasm_module_crate_name: &str) { /* Modified to pass specific function and args */
     println!("\n--- Running Developer Deployment Simulation Phase for DID {} (Wasm Crate: {}) ---", developer_did, wasm_module_crate_name);
     let wasm_base_path = "utils/sample_wasm_modules";
     let compilation_output: MockDappCompilation = match compile_dapp_mock(wasm_module_crate_name, developer_did, wasm_base_path) {
@@ -119,17 +117,19 @@ fn run_developer_deployment_phase(developer_did: &str, block_height: u64, wasm_m
     };
     println!("  -> AstroCLI: DApp '{}' from crate '{}' compiled. Hash: {}. Size: {}", compilation_output.dapp_name, wasm_module_crate_name, compilation_output.mock_wasm_bytecode_hash, compilation_output.wasm_bytecode.len());
     match request_dapp_deployment(compilation_output.clone(), "AetherCore_Target", block_height) {
-        Ok(deployed_id) => {
-            println!("  -> AstroCLI: DApp '{}' deployed. Module ID: '{}'", compilation_output.dapp_name, deployed_id);
+        Ok(deployed_module_id) => {
+            println!("  -> AstroCLI: DApp '{}' deployed. Module ID: '{}'", compilation_output.dapp_name, deployed_module_id);
             stl::update_trust_score(developer_did, stl::GOVERNANCE_CONTEXT, 0.1, "Deployed DApp");
+
             // Test execution for specific deployed DApps
-            if deployed_id == "sample_wasm_module_add" {
-                let exec_req = ExecutionRequest { module_id: deployed_id, function_name: "add".to_string(), arguments: vec![Value::I32(700), Value::I32(52)] };
-                if let Ok(res) = aethercore_runtime::execute_module(exec_req) { println!("  -> AetherCore (sample_add): Output: {:?}", res.output_values); }
-            } else if deployed_id == "sample_wasm_host_interaction" {
-                let exec_req_log = ExecutionRequest { module_id: deployed_id.clone(), function_name: "perform_action_and_log".to_string(), arguments: Vec::new() };
+            if deployed_module_id == "sample_wasm_module_add" {
+                let exec_req = ExecutionRequest { module_id: deployed_module_id, function_name: "add".to_string(), arguments: vec![Value::I32(700), Value::I32(52)] };
+                if let Ok(res) = aethercore_runtime::execute_module(exec_req) { println!("  -> AetherCore (sample_add): Output: {:?}, Logs: {:?}", res.output_values, res.logs); }
+            } else if deployed_module_id == "sample_wasm_host_interaction" {
+                let exec_req_log = ExecutionRequest { module_id: deployed_module_id.clone(), function_name: "perform_action_and_log".to_string(), arguments: Vec::new() };
                 if let Ok(res) = aethercore_runtime::execute_module(exec_req_log) { println!("  -> AetherCore (host_log): Output: {:?}, Logs: {:?}", res.output_values, res.logs); }
-                let exec_req_val = ExecutionRequest { module_id: deployed_id, function_name: "process_and_log_value".to_string(), arguments: vec![Value::I32(155)] };
+                
+                let exec_req_val = ExecutionRequest { module_id: deployed_module_id, function_name: "process_and_log_value".to_string(), arguments: vec![Value::I32(155)] };
                 if let Ok(res) = aethercore_runtime::execute_module(exec_req_val) { println!("  -> AetherCore (host_val_log): Output: {:?}, Logs: {:?}", res.output_values, res.logs); }
             }
         }
@@ -154,53 +154,28 @@ fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str
 
 fn run_reality_sync_prediction_phase(sensor_operator_did: &str, block_height: u64) {
     println!("\n--- Running Reality Sync & Prediction Simulation Phase ---");
-
-    // 1. EonMirror ingests some real-world data
     let mut sensor_metadata = HashMap::new();
     sensor_metadata.insert("unit".to_string(), "ppm".to_string());
-    sensor_metadata.insert("sensor_model".to_string(), "AQMaxPro_v3".to_string());
-
     let data_point1 = RealWorldDataPoint {
-        source_id: "iot_sensor_zoneA_pollution".to_string(),
-        data_type: "pollution_ppm".to_string(),
-        value_as_string: "75.5".to_string(),
-        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
-        location_geohash: Some("u4pruydqqvj".to_string()), // Mock geohash for London area
-        metadata: sensor_metadata.clone(),
+        source_id: "iot_sensor_zoneA_pollution".to_string(), data_type: "pollution_ppm".to_string(),
+        value_as_string: "75.5".to_string(), timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+        location_geohash: Some("u4pruydqqvj".to_string()), metadata: sensor_metadata.clone(),
     };
-
     let isn_data_node = match ingest_real_world_data(data_point1, block_height) {
-        Ok(node) => node,
-        Err(e) => { eprintln!("[RealitySync] Error ingesting data: {}", e); return; }
+        Ok(node) => node, Err(e) => { eprintln!("[RealitySync] Error ingesting data: {}", e); return; }
     };
-    println!("  -> EonMirror: Ingested data and recorded in ISN Node ID: {}", isn_data_node.id);
-    stl::update_trust_score(sensor_operator_did, stl::FINANCIAL_CONTEXT, 0.01, "Provided sensor data"); // Small reward for data provision
-
-
-    // 2. ChronoForge generates a prediction based on this data
-    let model_to_use = "env_pollution_model_v1";
-    match generate_prediction_from_isn_data(&isn_data_node.id, model_to_use, block_height + 1) {
+    println!("  -> EonMirror: Ingested data, ISN Node ID: {}", isn_data_node.id);
+    stl::update_trust_score(sensor_operator_did, stl::FINANCIAL_CONTEXT, 0.01, "Provided sensor data");
+    match generate_prediction_from_isn_data(&isn_data_node.id, "env_pollution_model_v1", block_height + 1) {
         Ok(prediction) => {
-            println!("  -> ChronoForge: Generated Prediction ID: '{}', Type: '{}', Event: '{}'",
-                prediction.prediction_id, prediction.prediction_type, prediction.predicted_value_or_event);
-
-            // 3. GaiaPulse Engine (or another system) reacts to the prediction
-            // Pass the DID of an entity that might be responsible for ZoneA or an eco-response team
-            let zone_a_guardian_did = "did:aurora:eco_guardian_zone_a"; // Needs to be created for STL updates
-            stl::initialize_entity_trust(zone_a_guardian_did); // Initialize if not present
-
-            react_to_environmental_prediction(
-                &prediction.prediction_type,
-                &prediction.predicted_value_or_event,
-                prediction.confidence_score,
-                block_height + 2, // Simulate next block for reaction
-                Some(zone_a_guardian_did)
-            );
+            println!("  -> ChronoForge: Generated Prediction ID: '{}', Type: '{}'", prediction.prediction_id, prediction.prediction_type);
+            let zone_a_guardian_did = "did:aurora:eco_guardian_zone_a";
+            stl::initialize_entity_trust(zone_a_guardian_did);
+            react_to_environmental_prediction(&prediction.prediction_type, &prediction.predicted_value_or_event, prediction.confidence_score, block_height + 2, Some(zone_a_guardian_did));
         }
         Err(e) => eprintln!("[RealitySync] Error generating prediction: {}", e),
     }
 }
-
 
 fn main() {
     println!("=== Aurora Full Lifecycle Simulation (All Phases including Reality Sync) ===");
@@ -208,39 +183,44 @@ fn main() {
     let block_height_init = get_next_mock_block_height();
     let user_punk_did = create_celestial_id("user_punk_789", "pk_punk", block_height_init).unwrap().did;
     let dev_aurora_did = create_celestial_id("developer_aurora_core_001", "pk_dev_core", block_height_init).unwrap().did;
-    let voter_alpha_did = create_celestial_id("voter_alpha_stl_green", "pk_voter_a", block_height_init).unwrap().did; // Also our sensor operator
+    let voter_alpha_did = create_celestial_id("voter_alpha_stl_green", "pk_voter_a", block_height_init).unwrap().did;
     let dapp_developer_did = create_celestial_id("dapp_dev_cosmic", "pk_dapp_dev", block_height_init).unwrap().did;
     let malicious_dev_did = create_celestial_id("malicious_dev_007", "pk_mal_dev", block_height_init).unwrap().did;
     let risky_dev_did = create_celestial_id("risky_dev_008", "pk_risky_dev", block_height_init).unwrap().did;
-    let other_voters = vec![
+    let other_voters_temp = vec![
         create_celestial_id("voter_beta_stl", "pk_voter_b", block_height_init).unwrap().did,
         create_celestial_id("voter_gamma_stl", "pk_voter_g", block_height_init).unwrap().did
     ];
+    // Convert Vec<String> to Vec<&str> for functions that expect it.
+    // This is a bit clunky for a simulation but demonstrates the type need.
+    let other_voters: Vec<&str> = other_voters_temp.iter().map(AsRef::as_ref).collect();
+
     let obligee_did_str = create_celestial_id("obligee_user_001", "pk_obligee", block_height_init).unwrap().did;
     println!("  -> SoulStar: Created DIDs.");
-    let all_dids_for_stl: Vec<&String> = vec![&user_punk_did, &dev_aurora_did, &voter_alpha_did, &other_voters[0], &other_voters[1], &obligee_did_str, &dapp_developer_did, &malicious_dev_did, &risky_dev_did];
-    all_dids_for_stl.iter().for_each(|did| stl::initialize_entity_trust(did));
+    let mut all_dids_for_stl_strings = vec![user_punk_did.clone(), dev_aurora_did.clone(), voter_alpha_did.clone(), other_voters_temp[0].clone(), other_voters_temp[1].clone(), obligee_did_str.clone(), dapp_developer_did.clone(), malicious_dev_did.clone(), risky_dev_did.clone()];
+    all_dids_for_stl_strings.iter().for_each(|did_str| stl::initialize_entity_trust(did_str));
+
 
     run_financial_simulation_phase(&user_punk_did, get_next_mock_block_height());
-    run_governance_simulation_phase(&dev_aurora_did, vec![&voter_alpha_did, &other_voters[0], &other_voters[1]], get_next_mock_block_height());
+    run_governance_simulation_phase(&dev_aurora_did, vec![&voter_alpha_did, other_voters[0], other_voters[1]], get_next_mock_block_height());
     run_von_simulation_phase(&user_punk_did, &obligee_did_str, get_next_mock_block_height());
     run_ecological_simulation_phase(&voter_alpha_did, get_next_mock_block_height());
-    run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "sample_wasm_module_add"); // Deploy the "add" Wasm
-    run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "sample_wasm_host_interaction"); // Deploy the "host_interaction" Wasm
-    run_reality_sync_prediction_phase(&voter_alpha_did, get_next_mock_block_height()); // voter_alpha_did acts as sensor operator
+    run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "sample_wasm_module_add");
+    run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "sample_wasm_host_interaction");
+    run_reality_sync_prediction_phase(&voter_alpha_did, get_next_mock_block_height());
     run_risk_ethics_simulation_phase(&malicious_dev_did, &risky_dev_did, "sample_wasm_module_add", get_next_mock_block_height());
 
     println!("\n--- Final Mock STL Scores ---");
-    for did_str in all_dids_for_stl.iter() {
-        println!("  DID: {}, Gov: {:.2}, Fin: {:.2}", did_str,
-            stl::get_contextual_trust_score(did_str, stl::GOVERNANCE_CONTEXT),
-            stl::get_contextual_trust_score(did_str, stl::FINANCIAL_CONTEXT));
+    for did_str_owned in all_dids_for_stl_strings.iter() { // Iterate over owned Strings
+        println!("  DID: {}, Gov: {:.2}, Fin: {:.2}", did_str_owned,
+            stl::get_contextual_trust_score(did_str_owned, stl::GOVERNANCE_CONTEXT),
+            stl::get_contextual_trust_score(did_str_owned, stl::FINANCIAL_CONTEXT));
     }
-    let zone_a_guardian_did = "did:aurora:eco_guardian_zone_a"; // Ensure this one is printed too
+    let zone_a_guardian_did = "did:aurora:eco_guardian_zone_a";
+    stl::initialize_entity_trust(zone_a_guardian_did); // Ensure it's initialized before getting score
     println!("  DID: {}, Gov: {:.2}, Fin: {:.2}", zone_a_guardian_did,
             stl::get_contextual_trust_score(zone_a_guardian_did, stl::GOVERNANCE_CONTEXT),
             stl::get_contextual_trust_score(zone_a_guardian_did, stl::FINANCIAL_CONTEXT));
-
 
     println!("\n=== Full Simulation Complete ===");
 }
