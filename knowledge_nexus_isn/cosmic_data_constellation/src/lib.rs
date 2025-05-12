@@ -12,114 +12,91 @@ pub struct IsnNode {
     pub created_at_block: u64,
 }
 
-#[derive(Debug)]
-pub struct Edge {
-    pub from_node_id: String,
-    pub to_node_id: String,
-    pub relationship: String,
-}
-
 static ISN_MOCK_DB: Lazy<Mutex<HashMap<String, IsnNode>>> = Lazy::new(|| {
     Mutex::new(HashMap::new())
 });
 
-pub fn record_confirmed_operation(
-    operation_type: &str, originator_id: &str, transaction_id: &str, block_height: u64, details: HashMap<String, String>,
+// Helper to create and store an ISN node
+fn create_and_store_isn_node(
+    base_id_prefix: &str,
+    node_type: &str,
+    block_height: u64,
+    mut properties: HashMap<String, String>, // Takes ownership
+    main_subject_key: &str, // e.g., "transaction_id", "proposal_id"
+    main_subject_value: &str,
 ) -> Result<IsnNode, String> {
-    let node_id = format!("op_record_{}", uuid::Uuid::new_v4());
-    let mut properties = details;
-    properties.insert("operation_type".to_string(), operation_type.to_string());
-    properties.insert("originator_id".to_string(), originator_id.to_string());
-    properties.insert("transaction_id".to_string(), transaction_id.to_string());
-    let new_node = IsnNode { id: node_id.clone(), r#type: "ConfirmedOperation".to_string(), properties, created_at_block: block_height };
+    let node_id = format!("{}_{}", base_id_prefix, uuid::Uuid::new_v4());
+    properties.insert(main_subject_key.to_string(), main_subject_value.to_string());
+
+    let new_node = IsnNode {
+        id: node_id.clone(),
+        r#type: node_type.to_string(),
+        properties,
+        created_at_block: block_height,
+    };
     ISN_MOCK_DB.lock().unwrap().insert(node_id.clone(), new_node.clone());
-    println!("[ISN_CDC] Recorded confirmed operation. Node ID: {}, Type: {}, Originator: {}, TxID: {}, Block: {}", new_node.id, operation_type, originator_id, transaction_id, block_height);
+    println!("[ISN_CDC] Recorded {}. Node ID: {}, Subject ID: {}, Block: {}",
+        node_type, new_node.id, main_subject_value, block_height);
     Ok(new_node)
 }
 
-pub fn record_governance_action(
-    proposal_id: &str, outcome: &str, block_height: u64, details: HashMap<String, String>,
+pub fn record_confirmed_operation(
+    operation_type: &str, originator_id: &str, transaction_id: &str, block_height: u64, mut details: HashMap<String, String>,
 ) -> Result<IsnNode, String> {
-    let node_id = format!("gov_action_{}", uuid::Uuid::new_v4());
-    let mut properties = details;
-    properties.insert("proposal_id".to_string(), proposal_id.to_string());
-    properties.insert("outcome".to_string(), outcome.to_string());
-    let new_node = IsnNode { id: node_id.clone(), r#type: "GovernanceAction".to_string(), properties, created_at_block: block_height };
-    ISN_MOCK_DB.lock().unwrap().insert(node_id.clone(), new_node.clone());
-    println!("[ISN_CDC] Recorded governance action. Node ID: {}, Proposal: {}, Outcome: {}, Block: {}", new_node.id, proposal_id, outcome, block_height);
-    Ok(new_node)
+    details.insert("operation_type".to_string(), operation_type.to_string());
+    details.insert("originator_id".to_string(), originator_id.to_string());
+    create_and_store_isn_node("op_record", "ConfirmedOperation", block_height, details, "transaction_id", transaction_id)
+}
+
+pub fn record_governance_action(
+    proposal_id: &str, outcome: &str, block_height: u64, mut details: HashMap<String, String>,
+) -> Result<IsnNode, String> {
+    details.insert("outcome".to_string(), outcome.to_string());
+    create_and_store_isn_node("gov_action", "GovernanceAction", block_height, details, "proposal_id", proposal_id)
 }
 
 pub fn record_identity_creation(
     did: &str, block_height: u64, details: HashMap<String, String>,
 ) -> Result<IsnNode, String> {
-    let node_id = format!("identity_{}", uuid::Uuid::new_v4());
-    let mut properties = details;
-    properties.insert("did".to_string(), did.to_string());
-    let new_node = IsnNode { id: node_id.clone(), r#type: "CelestialIdentity".to_string(), properties, created_at_block: block_height };
-    ISN_MOCK_DB.lock().unwrap().insert(node_id.clone(), new_node.clone());
-    println!("[ISN_CDC] Recorded identity creation. Node ID: {}, DID: {}, Block: {}", new_node.id, did, block_height);
-    Ok(new_node)
+    create_and_store_isn_node("identity", "CelestialIdentity", block_height, details, "did", did)
 }
 
 pub fn record_obligation_status(
-    obligation_id: &str, status: &str, block_height: u64, details: HashMap<String, String>,
+    obligation_id: &str, status: &str, block_height: u64, mut details: HashMap<String, String>,
 ) -> Result<IsnNode, String> {
-    let node_id = format!("obligation_status_{}", uuid::Uuid::new_v4());
-    let mut properties = details;
-    properties.insert("obligation_id".to_string(), obligation_id.to_string());
-    properties.insert("status".to_string(), status.to_string());
-    let new_node = IsnNode { id: node_id.clone(), r#type: "VerifiableObligationStatus".to_string(), properties, created_at_block: block_height };
-    ISN_MOCK_DB.lock().unwrap().insert(node_id.clone(), new_node.clone());
-    println!("[ISN_CDC] Recorded obligation status. Node ID: {}, Obligation: {}, Status: {}, Block: {}", new_node.id, obligation_id, status, block_height);
-    Ok(new_node)
+    details.insert("status".to_string(), status.to_string());
+    create_and_store_isn_node("obligation_status", "VerifiableObligationStatus", block_height, details, "obligation_id", obligation_id)
 }
 
 pub fn record_ecocredit_minting(
     credit_id: &str, block_height: u64, details: HashMap<String, String>,
 ) -> Result<IsnNode, String> {
-    let node_id = format!("ecocredit_mint_{}", uuid::Uuid::new_v4());
-    let mut properties = details;
-    properties.insert("credit_id".to_string(), credit_id.to_string());
-    let new_node = IsnNode { id: node_id.clone(), r#type: "EcoFluxCreditMinted".to_string(), properties, created_at_block: block_height };
-    ISN_MOCK_DB.lock().unwrap().insert(node_id.clone(), new_node.clone());
-    println!("[ISN_CDC] Recorded EcoFluxCredit minting. Node ID: {}, Credit ID: {}, Block: {}", new_node.id, credit_id, block_height);
-    Ok(new_node)
+    create_and_store_isn_node("ecocredit_mint", "EcoFluxCreditMinted", block_height, details, "credit_id", credit_id)
 }
 
 pub fn record_ecoreward_distribution(
     reward_record_id: &str, block_height: u64, details: HashMap<String, String>,
 ) -> Result<IsnNode, String> {
-    let node_id = format!("ecoreward_dist_{}", uuid::Uuid::new_v4());
-    let mut properties = details;
-    properties.insert("reward_record_id".to_string(), reward_record_id.to_string());
-    let new_node = IsnNode { id: node_id.clone(), r#type: "EcoRewardDistributed".to_string(), properties, created_at_block: block_height };
-    ISN_MOCK_DB.lock().unwrap().insert(node_id.clone(), new_node.clone());
-    println!("[ISN_CDC] Recorded EcoReward distribution. Node ID: {}, Reward Record ID: {}, Block: {}", new_node.id, reward_record_id, block_height);
-    Ok(new_node)
+    create_and_store_isn_node("ecoreward_dist", "EcoRewardDistributed", block_height, details, "reward_record_id", reward_record_id)
 }
 
 pub fn record_module_deployment(
-    module_id: &str, // The ID AetherCore assigns
-    dapp_name: &str,
-    block_height: u64,
-    details: HashMap<String, String>, // e.g., developer_did, bytecode_hash, version
+    module_id: &str, dapp_name: &str, block_height: u64, mut details: HashMap<String, String>,
 ) -> Result<IsnNode, String> {
-    let node_id = format!("module_deploy_{}", uuid::Uuid::new_v4());
-    let mut properties = details;
-    properties.insert("module_id".to_string(), module_id.to_string());
-    properties.insert("dapp_name".to_string(), dapp_name.to_string());
+    details.insert("dapp_name".to_string(), dapp_name.to_string());
+    create_and_store_isn_node("module_deploy", "ModuleDeployment", block_height, details, "module_id", module_id)
+}
 
-    let new_node = IsnNode {
-        id: node_id.clone(),
-        r#type: "ModuleDeployment".to_string(),
-        properties,
-        created_at_block: block_height,
-    };
-    ISN_MOCK_DB.lock().unwrap().insert(node_id.clone(), new_node.clone());
-    println!("[ISN_CDC] Recorded Module Deployment. Node ID: {}, Module ID: {}, DApp Name: {}, Block: {}",
-        new_node.id, module_id, dapp_name, block_height);
-    Ok(new_node)
+pub fn record_penalty_event(
+    penalty_id: &str, block_height: u64, details: HashMap<String, String>,
+) -> Result<IsnNode, String> {
+    create_and_store_isn_node("penalty", "PenaltyEvent", block_height, details, "penalty_id", penalty_id)
+}
+
+pub fn record_integrity_report(
+    report_id: &str, block_height: u64, details: HashMap<String, String>,
+) -> Result<IsnNode, String> {
+    create_and_store_isn_node("nci_report", "IntegrityStarReport", block_height, details, "report_id", report_id)
 }
 
 pub fn get_isn_node(node_id: &str) -> Option<IsnNode> {

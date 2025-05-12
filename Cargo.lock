@@ -16,6 +16,8 @@ version = "0.1.0"
 dependencies = [
  "aethercore_runtime",
  "cosmic_data_constellation",
+ "hex",
+ "sha2",
  "starforge_grants",
  "uuid",
 ]

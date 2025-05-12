@@ -6,4 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+aethercore_runtime = { path = "../../sgs_foundations/aethercore_runtime" }
+symbiotic_trust_lattice_stl = { path = "../../trust_obligation_stl_von/symbiotic_trust_lattice_stl" }
+cosmic_data_constellation = { path = "../../knowledge_nexus_isn/cosmic_data_constellation" }
+uuid = { version = "1.8.0", features = ["v4"] }
  # Add dependencies here

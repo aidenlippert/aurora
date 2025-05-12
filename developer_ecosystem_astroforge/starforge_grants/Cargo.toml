@@ -6,4 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+nexus_cosmic_introspection_nci = { path = "../../ethical_oversight_ego/nexus_cosmic_introspection_nci" }
+primeaxiom_vault = { path = "../../ethical_oversight_ego/primeaxiom_vault" }
  # Add dependencies here

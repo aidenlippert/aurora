@@ -1,36 +1,34 @@
-use aethercore_runtime::{ExecutionRequest, DeployedModuleInfo};
+use aethercore_runtime::{ExecutionRequest, DeployedModuleInfo, MockWasmInstruction}; // Added MockWasmInstruction
 use ecliptic_concordance::{Transaction as ConsensusTransaction, Block};
-
 use novavault_flux_finance::{FinancialOperationType as NovaVaultOpType, FinancialOperation};
 use celestial_synapse_network_csn as csn;
-
 use starsenate_collectives_governance::{ProposalStatus, submit_proposal, cast_vote_on_proposal, tally_votes_and_decide};
-
 use soulstar_matrix_identity::create_celestial_id;
 use symbiotic_trust_lattice_stl as stl;
 use verifiable_obligation_nexus_von as von;
-
 use gaiapulse_engine::process_green_operation_attestation;
 use econova_incentives::calculate_and_distribute_fluxboost_reward;
-
 use astrocli_deployment_nexus::{compile_dapp_mock, request_dapp_deployment, MockDappCompilation};
+
+// New imports for Risk & Ethics phase
+use ethical_oversight_ego::primeaxiom_vault::{check_code_against_axioms, CodeToCheck};
+use ethical_oversight_ego::nexus_cosmic_introspection_nci::{scan_dapp_code_for_risks, generate_integrity_report};
+use risk_mitigation::nebulashield_defenses::{detect_anomalous_operation, OperationTrace, AnomalyType};
+use security_privacy_aegis::cosmic_justice_enforcers::{apply_penalty_for_misbehavior, MisbehaviorType};
 
 
 use std::collections::HashMap;
 use sha2::{Sha256, Digest};
 use hex;
 
-fn mock_hash_data<T: std::fmt::Debug>(data: &T) -> String { /* same as before */
-    let mut hasher = Sha256::new();
-    hasher.update(format!("{:?}", data).as_bytes());
-    let result = hasher.finalize();
-    hex::encode(result)
+fn mock_hash_data<T: std::fmt::Debug>(data: &T) -> String { /* ... */
+    let mut hasher = Sha256::new(); hasher.update(format!("{:?}", data).as_bytes()); hex::encode(hasher.finalize())
 }
-fn get_next_mock_block_height() -> u64 { /* same as before */
-    static mut MOCK_HEIGHT_COUNTER: u64 = 0;
-    unsafe { MOCK_HEIGHT_COUNTER += 1; MOCK_HEIGHT_COUNTER }
+fn get_next_mock_block_height() -> u64 { /* ... */
+    static mut MOCK_HEIGHT_COUNTER: u64 = 0; unsafe { MOCK_HEIGHT_COUNTER += 1; MOCK_HEIGHT_COUNTER }
 }
-fn run_financial_simulation_phase(user_did: &str, block_height: u64) { /* same as before, ensure printlns are present */
+
+fn run_financial_simulation_phase(user_did: &str, block_height: u64) { /* Omitted for brevity - same as before */
     println!("\n--- Running Financial Simulation Phase for {} ---", user_did);
     let mut public_payload_details: HashMap<String, String> = HashMap::new();
     public_payload_details.insert("to_address_public_key_hash".to_string(), "hash_of_cosmic_789_pk".to_string());
@@ -46,8 +44,8 @@ fn run_financial_simulation_phase(user_did: &str, block_height: u64) { /* same a
     full_public_payload.insert("fee_paid".to_string(), csn_suggested_fee.to_string());
     let financial_op_result: FinancialOperation = novavault_flux_finance::process_financial_operation(user_did, NovaVaultOpType::PrivateTransferAUC, full_public_payload, private_inputs_data.clone(), block_height).expect("NV process failed");
     if let Some(ref _proof) = financial_op_result.zk_proof { stl::update_trust_score(user_did, stl::FINANCIAL_CONTEXT, 0.05, "Generated ZKP"); }
-    let exec_req = ExecutionRequest { module_id: "private_auc_handler_v1".to_string(), function_name: "log_private_op_intent".to_string(), arguments: Vec::new() /* Args for log intent */ };
-    if let Ok(exec_res) = aethercore_runtime::execute_module(exec_req) { println!("  -> AetherCore: Executed. Success: {}, Output: {:?}", exec_res.success, String::from_utf8_lossy(&exec_res.output_value.map_or_else(Vec::new, |v| v.to_string().into_bytes()))); }
+    let exec_req = ExecutionRequest { module_id: "private_auc_handler_v1".to_string(), function_name: "log_private_op_intent".to_string(), arguments: Vec::new() };
+    if let Ok(exec_res) = aethercore_runtime::execute_module(exec_req) { println!("  -> AetherCore: Executed. Success: {}, Output: {:?}", exec_res.success, exec_res.output_value.map_or_else(|| "None".to_string(), |v| v.to_string())); }
     let op_hash = mock_hash_data(&financial_op_result.payload);
     let consensus_tx: ConsensusTransaction = ecliptic_concordance::submit_for_consensus(op_hash, financial_op_result.zk_proof.clone()).expect("Consensus submit failed");
     let finalized_block: Block = ecliptic_concordance::form_and_finalize_block(vec![consensus_tx]).expect("Block finalize failed");
@@ -56,7 +54,7 @@ fn run_financial_simulation_phase(user_did: &str, block_height: u64) { /* same a
     csn::monitor_novavault_activity_patterns();
     if let Ok(bal) = novavault_flux_finance::get_account_balance(user_did, "AUC_PRIVATE") { println!("  -> NovaVault: Balance for {} (AUC_PRIVATE): {} (mock ISN)", user_did, bal); }
 }
-fn run_governance_simulation_phase(proposer_did_str: &str, voter_dids: Vec<&str>, block_height: u64) { /* same as before, ensure printlns */
+fn run_governance_simulation_phase(proposer_did_str: &str, voter_dids: Vec<&str>, block_height: u64) { /* Omitted - same */
     println!("\n--- Running Governance Simulation Phase ---");
     let target_module_id = "mock_contract_v1".to_string();
     let new_code_hash = mock_hash_data(&"new_wasm_code_for_v1_1_0");
@@ -71,7 +69,6 @@ fn run_governance_simulation_phase(proposer_did_str: &str, voter_dids: Vec<&str>
         Ok(ProposalStatus::Approved) => {
             println!("  -> StarSenate: Proposal ID '{}' APPROVED.", proposal.id);
             stl::update_trust_score(proposer_did_str, stl::GOVERNANCE_CONTEXT, 0.2, "Proposal approved");
-            // For mock upgrade, pass None for new_instructions or specific mock instructions
             aethercore_runtime::acknowledge_module_upgrade(&target_module_id, "version_1.1.0", &new_code_hash, None).expect("Upgrade ack failed");
             println!("  -> AetherCore: Upgraded module '{}'.", target_module_id);
         }
@@ -80,7 +77,7 @@ fn run_governance_simulation_phase(proposer_did_str: &str, voter_dids: Vec<&str>
         Err(e) => eprintln!("[GovSim] Error tallying votes: {}", e),
     }
 }
-fn run_von_simulation_phase(obligor_did_str: &str, obligee_did_str: &str, block_height: u64) { /* same as before, ensure printlns */
+fn run_von_simulation_phase(obligor_did_str: &str, obligee_did_str: &str, block_height: u64) { /* Omitted - same */
     println!("\n--- Running Verifiable Obligation Nexus (VON) Simulation Phase ---");
     let due_timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 86400;
     let obligation = von::create_fluxpact_contract(obligor_did_str, obligee_did_str, "Deliver resources", 50, due_timestamp, block_height).expect("Obligation creation failed");
@@ -96,7 +93,7 @@ fn run_von_simulation_phase(obligor_did_str: &str, obligee_did_str: &str, block_
         Err(e) => eprintln!("[VONSim] Error attesting fulfillment: {}", e),
     }
 }
-fn run_ecological_simulation_phase(green_validator_did: &str, block_height: u64) { /* same as before, ensure printlns */
+fn run_ecological_simulation_phase(green_validator_did: &str, block_height: u64) { /* Omitted - same */
     println!("\n--- Running Ecological Simulation Phase for DID {} ---", green_validator_did);
     let operation_description = format!("Validated block #{} with green energy", block_height);
     match process_green_operation_attestation(green_validator_did, &operation_description, 5, block_height) {
@@ -109,45 +106,90 @@ fn run_ecological_simulation_phase(green_validator_did: &str, block_height: u64)
     let op_id_for_reward = format!("block_proposal_{}", block_height);
     if let Ok(Some(boost)) = calculate_and_distribute_fluxboost_reward(green_validator_did, 100, &op_id_for_reward, block_height) { println!("  -> EcoNova: FluxBoost of {} distributed.", boost); }
 }
+fn run_developer_deployment_phase(developer_did: &str, block_height: u64, dapp_name_to_deploy: &str) { // Added dapp_name_to_deploy
+    println!("\n--- Running Developer Deployment Simulation Phase for DID {} (DApp: {}) ---", developer_did, dapp_name_to_deploy);
+    let dapp_source_path = format!("{}.rs", dapp_name_to_deploy); // Use the name for mock path
 
-fn run_developer_deployment_phase(developer_did: &str, block_height: u64) {
-    println!("\n--- Running Developer Deployment Simulation Phase for DID {} ---", developer_did);
-    let dapp_source_path = "my_new_dapp.rs"; // Mock source path, name used for behavior
-
-    let compilation_output: MockDappCompilation = match compile_dapp_mock(dapp_source_path, developer_did) {
+    let compilation_output: MockDappCompilation = match compile_dapp_mock(&dapp_source_path, developer_did) {
         Ok(comp) => comp,
         Err(e) => { eprintln!("[DevSim] DApp compilation failed: {}", e); return; }
     };
-    println!("  -> AstroCLI: DApp '{}' compiled. Bytecode Hash: {}. Instructions: {:?}",
-        compilation_output.dapp_name, compilation_output.mock_wasm_bytecode_hash, compilation_output.instructions);
+    println!("  -> AstroCLI: DApp '{}' compiled. Bytecode Hash: {}. Instructions: {:?}", compilation_output.dapp_name, compilation_output.mock_wasm_bytecode_hash, compilation_output.instructions);
 
     let deployment_target = "AetherCore_Main_Shard_Group_Alpha";
     match request_dapp_deployment(compilation_output.clone(), deployment_target, block_height) {
         Ok(deployed_module_id) => {
             println!("  -> AstroCLI: DApp '{}' deployment successful. Deployed Module ID: '{}'", compilation_output.dapp_name, deployed_module_id);
-            stl::update_trust_score(developer_did, stl::GOVERNANCE_CONTEXT, 0.1, "Successfully deployed a DApp");
+            stl::update_trust_score(developer_did, stl::GOVERNANCE_CONTEXT, 0.1, &format!("Successfully deployed DApp: {}", dapp_name_to_deploy));
 
-            println!("\n  --- Attempting to execute newly deployed DApp '{}' ---", deployed_module_id);
-            let exec_request = ExecutionRequest {
-                module_id: deployed_module_id.clone(), // Use the ID AetherCore returned/confirmed
-                function_name: "greet".to_string(), // This function name isn't really used by our simple interpreter yet
-                arguments: vec![77], // Pass some mock arguments for the new DApp
-            };
-            match aethercore_runtime::execute_module(exec_request) {
-                Ok(result) => {
-                    println!("  -> AetherCore (New DApp Exec): Success: {}, OutputValue: {:?}, Gas: {}, Memory: {:?}",
-                        result.success, result.output_value, result.gas_used, result.memory_snapshot);
-                    for log_msg in result.logs { println!("     AetherCore Log (New DApp): {}", log_msg); }
+            if dapp_name_to_deploy == "my_new_dapp" { // Only execute if it's the "good" DApp
+                println!("\n  --- Attempting to execute newly deployed DApp '{}' ---", deployed_module_id);
+                let exec_request = ExecutionRequest {
+                    module_id: deployed_module_id.clone(),
+                    function_name: "greet".to_string(), // This function name isn't really used by our simple interpreter yet
+                    arguments: vec![77],
+                };
+                match aethercore_runtime::execute_module(exec_request) {
+                    Ok(result) => {
+                        println!("  -> AetherCore (New DApp Exec): Success: {}, OutputValue: {:?}, Gas: {}, Memory: {:?}", result.success, result.output_value, result.gas_used, result.memory_snapshot);
+                        for log_msg in result.logs { println!("     AetherCore Log (New DApp): {}", log_msg); }
+                    }
+                    Err(e) => eprintln!("  -> AetherCore (New DApp): Execution failed: {}", e),
                 }
-                Err(e) => eprintln!("  -> AetherCore (New DApp): Execution failed: {}", e),
             }
         }
         Err(e) => {
-            eprintln!("[DevSim] DApp deployment failed: {}", e);
-            stl::update_trust_score(developer_did, stl::GOVERNANCE_CONTEXT, -0.05, "Failed DApp deployment attempt");
+            eprintln!("[DevSim] DApp '{}' deployment failed: {}", compilation_output.dapp_name, e);
+            stl::update_trust_score(developer_did, stl::GOVERNANCE_CONTEXT, -0.1, &format!("Failed DApp deployment: {}", dapp_name_to_deploy));
         }
     }
 }
+
+fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str, normal_dapp_module_id: &str, block_height: u64) {
+    println!("\n--- Running Risk Mitigation & Ethical Oversight Simulation Phase ---");
+
+    // Scenario 1: Attempt to deploy a "malicious_dapp_attempt"
+    println!("\n  Scenario 1: Developer '{}' attempts to deploy 'malicious_dapp_attempt'...", malicious_dev_did);
+    run_developer_deployment_phase(malicious_dev_did, block_height, "malicious_dapp_attempt");
+
+    // Scenario 2: Attempt to deploy a "risky_dapp_code" (passes Axiom, but NCI finds issues)
+    println!("\n  Scenario 2: Developer '{}' attempts to deploy 'risky_dapp_code'...", risky_dev_did);
+    run_developer_deployment_phase(risky_dev_did, block_height, "risky_dapp_code");
+
+
+    // Scenario 3: A deployed (non-malicious) DApp performs an anomalous operation
+    println!("\n  Scenario 3: Deployed DApp '{}' performs an anomalous operation...", normal_dapp_module_id);
+    // Let's assume 'my_new_dapp' (if deployed) or 'private_auc_handler_v1' can be made to act anomalously for the test
+    // For this mock, we'll create a trace manually that NebulaShield would detect.
+    let trace = OperationTrace {
+        module_id: normal_dapp_module_id.to_string(),
+        function_name: "critical_function".to_string(),
+        gas_used: 6000, // High gas
+        logs: vec!["Log: Normal operation step 1".to_string(), "Log: Attempting_exploit_pattern_here".to_string()],
+        return_value_hash: mock_hash_data(&"some_output"),
+    };
+
+    if let Some(anomaly) = nebulashield_defenses::detect_anomalous_operation(&trace) {
+        println!("  -> NebulaShield: Anomaly {:?} detected for module '{}'.", anomaly, normal_dapp_module_id);
+        let misbehavior = MisbehaviorType::AnomalyDetected(format!("{:?}", anomaly));
+        match apply_penalty_for_misbehavior(normal_dapp_module_id, misbehavior, 3, block_height + 1) {
+            Ok(()) => println!("  -> CosmicJustice: Penalty applied for anomalous operation of module '{}'.", normal_dapp_module_id),
+            Err(e) => eprintln!("  -> CosmicJustice: Error applying penalty: {}", e),
+        }
+        // NCI generates a report
+        let _ = generate_integrity_report(
+            normal_dapp_module_id,
+            "DAppOperation",
+            vec![format!("Anomaly detected: {:?}", anomaly)],
+            3,
+            vec!["Quarantine module, investigate developer.".to_string()],
+            block_height + 1
+        );
+    } else {
+         println!("  -> NebulaShield: No anomaly detected for module '{}' in this specific trace.", normal_dapp_module_id);
+    }
+}
+
 
 fn main() {
     println!("=== Aurora Full Lifecycle Simulation (All Phases) ===");
@@ -160,18 +202,23 @@ fn main() {
     let voter_gamma_did = create_celestial_id("voter_gamma_stl", "pk_voter_g", block_height_init).unwrap().did;
     let obligee_did_str = create_celestial_id("obligee_user_001", "pk_obligee", block_height_init).unwrap().did;
     let dapp_developer_did = create_celestial_id("dapp_dev_cosmic", "pk_dapp_dev", block_height_init).unwrap().did;
+    let malicious_dev_did = create_celestial_id("malicious_dev_007", "pk_mal_dev", block_height_init).unwrap().did;
+    let risky_dev_did = create_celestial_id("risky_dev_008", "pk_risky_dev", block_height_init).unwrap().did;
+
     println!("  -> SoulStar: Created DIDs.");
-    vec![&user_punk_did, &dev_aurora_did, &voter_alpha_did, &voter_beta_did, &voter_gamma_did, &obligee_did_str, &dapp_developer_did]
+    vec![&user_punk_did, &dev_aurora_did, &voter_alpha_did, &voter_beta_did, &voter_gamma_did, &obligee_did_str, &dapp_developer_did, &malicious_dev_did, &risky_dev_did]
         .iter().for_each(|did| stl::initialize_entity_trust(did));
 
     run_financial_simulation_phase(&user_punk_did, get_next_mock_block_height());
     run_governance_simulation_phase(&dev_aurora_did, vec![&voter_alpha_did, &voter_beta_did, &voter_gamma_did], get_next_mock_block_height());
     run_von_simulation_phase(&user_punk_did, &obligee_did_str, get_next_mock_block_height());
     run_ecological_simulation_phase(&voter_alpha_did, get_next_mock_block_height());
-    run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height());
+    run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "my_new_dapp"); // Deploy a "good" DApp first
+    run_risk_ethics_simulation_phase(&malicious_dev_did, &risky_dev_did, "my_new_dapp", get_next_mock_block_height());
+
 
     println!("\n--- Final Mock STL Scores ---");
-    for did_str in [&user_punk_did, &dev_aurora_did, &voter_alpha_did, &dapp_developer_did].iter() {
+    for did_str in [&user_punk_did, &dev_aurora_did, &voter_alpha_did, &dapp_developer_did, &malicious_dev_did, &risky_dev_did].iter() {
         println!("  DID: {}, Gov: {:.2}, Fin: {:.2}", did_str,
             stl::get_contextual_trust_score(did_str, stl::GOVERNANCE_CONTEXT),
             stl::get_contextual_trust_score(did_str, stl::FINANCIAL_CONTEXT));

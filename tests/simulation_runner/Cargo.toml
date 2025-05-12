@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+cosmic_justice_enforcers = { path = "../../security_privacy_aegis/cosmic_justice_enforcers" }
+nebulashield_defenses = { path = "../../risk_mitigation/nebulashield_defenses" }
+nexus_cosmic_introspection_nci = { path = "../../ethical_oversight_ego/nexus_cosmic_introspection_nci" }
+primeaxiom_vault = { path = "../../ethical_oversight_ego/primeaxiom_vault" }
 astrocli_deployment_nexus = { path = "../../developer_ecosystem_astroforge/astrocli_deployment_nexus" }
 econova_incentives = { path = "../../governance_economy/econova_incentives" }
 gaiapulse_engine = { path = "../../astral_hyper_engines/cluster_beta_material_ecological/gaiapulse_engine" }
