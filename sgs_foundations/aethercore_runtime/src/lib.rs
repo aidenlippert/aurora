@@ -8,7 +8,6 @@ use uuid::Uuid;
 // Wasmi imports
 use wasmi::{Engine, Module, Store, Linker, Caller, TypedFunc, Instance, Extern, Value, AsContextMut, Error as WasmiError};
 
-
 #[derive(Debug, Clone)]
 pub struct DeployedModuleInfo {
     pub version: String,
@@ -20,19 +19,18 @@ pub struct DeployedModuleInfo {
 pub struct ExecutionRequest {
     pub module_id: String,
     pub function_name: String,
-    pub arguments: Vec<Value>, // Use wasmi::Value for dynamic arguments
+    pub arguments: Vec<Value>,
 }
 
 #[derive(Debug)]
 pub struct ExecutionResult {
-    pub output_values: Vec<Value>, // Wasm functions can return multiple values
+    pub output_values: Vec<Value>,
     pub gas_used: u64,
     pub success: bool,
     pub logs: Vec<String>,
 }
 
 static ACTIVE_MODULES: Lazy<Mutex<HashMap<String, DeployedModuleInfo>>> = Lazy::new(|| {
-    // No pre-deployed modules with Wasm bytecode by default, they will be deployed by the simulation
     Mutex::new(HashMap::new())
 });
 
@@ -60,9 +58,6 @@ pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, Stri
         .map_err(|e| format!("Failed to parse Wasm module: {}", e))?;
     
     let mut linker = Linker::new(&engine);
-    // Add host functions to linker if needed, e.g.
-    // linker.func_wrap("env", "host_log_str", host_log_str_adapter).unwrap();
-
     let mut host_state = HostState { module_id_for_log: request.module_id.clone(), ..Default::default() };
     let mut store = Store::new(&engine, host_state);
 
@@ -73,66 +68,48 @@ pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, Stri
     let func = instance.get_func(&mut store, &request.function_name)
         .ok_or_else(|| format!("Failed to find function '{}' in module '{}'", request.function_name, request.module_id))?;
 
-    // Prepare results buffer based on function signature (if known, otherwise generic)
-    // For a generic call, we might not know the exact number of results.
-    // wasmi's Func::call expects a mutable slice for results.
-    // Let's determine result arity (number of results).
     let func_type = func.ty(&store);
     let num_results = func_type.results().len();
-    let mut results_buffer = vec![Value::I32(0); num_results]; // Initialize with default values
+    let mut results_buffer = vec![Value::I32(0); num_results];
 
     println!("[AetherCore] Invoking Wasm function '{}' (generic call)", request.function_name);
 
     match func.call(&mut store, &request.arguments, &mut results_buffer) {
-        Ok(()) => { // Func::call returns Result<(), Error>
+        Ok(()) => {
             let host_state_after_call = store.into_data();
             println!("[AetherCore] Wasm execution successful for '{}'. Results: {:?}", request.module_id, results_buffer);
             Ok(ExecutionResult {
                 output_values: results_buffer,
-                gas_used: 0, // Conceptual gas
+                gas_used: 0, 
                 success: true,
                 logs: host_state_after_call.logs,
             })
         }
-        Err(wasmi_error) => { // wasmi_error is wasmi::Error
-            let host_state_after_call = store.into_data();
+        Err(wasmi_error) => {
+            let _host_state_after_call = store.into_data(); // Logs in host_state might be lost or partial on trap
             eprintln!("[AetherCore] Wasm execution TRAP/Error for '{}': {:?}", request.module_id, wasmi_error);
-            // If it's a Trap, extract details if possible
-            let error_message = match wasmi_error {
-                WasmiError::Trap(trap) => format!("Wasm Trap: {:?}", trap.display(&store)),
-                other_error => format!("Wasm Error: {:?}", other_error),
-            };
+            // Use the Debug representation of the WasmiError enum itself
+            let error_message = format!("Wasm Execution Error: {:?}", wasmi_error);
             Err(error_message)
         }
     }
 }
 
 pub fn deploy_module(
-    module_id_suggestion: &str,
-    bytecode_hash: &str,
-    version: &str,
-    wasm_bytecode: Vec<u8>,
+    module_id_suggestion: &str, bytecode_hash: &str, version: &str, wasm_bytecode: Vec<u8>,
 ) -> Result<String, String> {
     let module_id = if ACTIVE_MODULES.lock().unwrap().contains_key(module_id_suggestion) {
         format!("{}_{}", module_id_suggestion, Uuid::new_v4().as_simple())
     } else {
         module_id_suggestion.to_string()
     };
-
     println!("[AetherCore] Deploying Wasm module. Suggested ID/Name: '{}', Assigned ID: '{}', Hash: {}, Version: {}, Bytecode size: {} bytes",
         module_id_suggestion, module_id, bytecode_hash, version, wasm_bytecode.len());
-    
     let engine = Engine::default();
     if let Err(e) = Module::new(&engine, &wasm_bytecode[..]) {
         return Err(format!("Invalid Wasm bytecode for module {}: {}", module_id, e));
     }
-
-    let module_info = DeployedModuleInfo {
-        version: version.to_string(),
-        bytecode_hash: bytecode_hash.to_string(),
-        wasm_bytecode,
-    };
-
+    let module_info = DeployedModuleInfo { version: version.to_string(), bytecode_hash: bytecode_hash.to_string(), wasm_bytecode };
     ACTIVE_MODULES.lock().unwrap().insert(module_id.clone(), module_info);
     println!("[AetherCore] Wasm module '{}' successfully deployed.", module_id);
     Ok(module_id)
@@ -143,7 +120,6 @@ pub fn acknowledge_module_upgrade(
 ) -> Result<(), String> {
     println!("[AetherCore] Acknowledging upgrade for module ID: '{}'. New version: '{}'. Changes hash: '{}'.",
         module_id, new_version_info, changes_hash);
-    
     let mut active_modules_db = ACTIVE_MODULES.lock().unwrap();
     if let Some(module_data) = active_modules_db.get_mut(module_id) {
         module_data.version = new_version_info.to_string();
