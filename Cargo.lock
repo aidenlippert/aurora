@@ -30,6 +30,7 @@ dependencies = [
  "novavault_flux_finance",
  "serde",
  "sha2",
+ "voidproof_engine_zkp",
 ]
 
 [[package]]
@@ -128,6 +129,7 @@ version = "0.1.0"
 dependencies = [
  "once_cell",
  "uuid",
+ "voidproof_engine_zkp",
 ]
 
 [[package]]
@@ -257,8 +259,11 @@ version = "0.1.0"
 dependencies = [
  "aethercore_runtime",
  "cosmic_data_constellation",
+ "hex",
  "semantic_synapse_interfaces",
+ "sha2",
  "uuid",
+ "voidproof_engine_zkp",
 ]
 
 [[package]]
@@ -443,6 +448,9 @@ version = "0.1.0"
 [[package]]
 name = "voidproof_engine_zkp"
 version = "0.1.0"
+dependencies = [
+ "uuid",
+]
 
 [[package]]
 name = "voidstar_navigator"

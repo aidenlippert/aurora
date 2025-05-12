@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+oraclesync_futarchy = { path = "../../governance_economy/oraclesync_futarchy" }
+starsenate_collectives_governance = { path = "../../astral_hyper_engines/cluster_alpha_economic_sovereign/starsenate_collectives_governance" }
 voidproof_engine_zkp = { path = "../../security_privacy_aegis/voidproof_engine_zkp" }
 celestial_synapse_network_csn = { path = "../../sgs_foundations/celestial_synapse_network_csn" }
 novavault_flux_finance = { path = "../../astral_hyper_engines/cluster_alpha_economic_sovereign/novavault_flux_finance" }
