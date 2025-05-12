@@ -5,11 +5,12 @@ use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
-// Wasmi imports - Ensure Trap and TrapCode are correctly imported
+// Wasmi imports - Corrected Trap and TrapCode import
 use wasmi::{
     Engine, Module, Store, Linker, Caller, Instance, Extern, Value, AsContextMut, Error as WasmiError,
-    Memory, MemoryType, Trap, TrapCode // These should be available
+    Memory, MemoryType
 };
+use wasmi::core::{Trap, TrapCode}; // Import Trap and TrapCode from wasmi::core
 
 #[derive(Debug, Clone)]
 pub struct DeployedModuleInfo {
@@ -120,7 +121,7 @@ pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, Stri
     let engine = Engine::default();
     let module = Module::new(&engine, &module_info.wasm_bytecode[..]).map_err(|e| format!("Wasm parse error: {}", e))?;
     
-    let mut linker = Linker::new(&engine); // Linker needs to be mut if funcs are added iteratively
+    let mut linker = Linker::new(&engine);
     linker.func_wrap("env", "host_log_message", host_log_message_adapter).map_err(|e| format!("Linker error: {}", e))?;
 
     let host_state = HostState { module_id_for_log: request.module_id.clone(), host_gas_remaining: request.gas_limit, ..Default::default() };
@@ -159,11 +160,11 @@ pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, Stri
                 || format!("Wasm Error: {:?}", wasmi_error),
                 |trap| format!("Host function trap: {:?}",trap)
             );
-            // Ensure gas consumed reflects up to the point of error or limit
-            let final_gas_consumed = if matches!(wasmi_error, WasmiError::Trap(ref t) if t.is_fuel_exhausted()) || final_host_state.host_function_trap.is_some() {
-                request.gas_limit // If out of fuel (Wasm or host), all limit is consumed
+            // Corrected fuel exhaustion check
+            let final_gas_consumed = if matches!(wasmi_error, WasmiError::Trap(ref t) if t.trap_code() == Some(TrapCode::OutOfFuel)) || final_host_state.host_function_trap.is_some() {
+                request.gas_limit 
             } else {
-                total_gas_consumed // Otherwise, what was actually used up to the error
+                total_gas_consumed 
             };
 
             eprintln!("[AetherCore] Wasm TRAP/Error for '{}': {}. FinalGasConsumed: {}", request.module_id, error_msg_str, final_gas_consumed);
@@ -172,7 +173,7 @@ pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, Stri
     }
 }
 
-pub fn deploy_module( /* ... same as before ... */
+pub fn deploy_module( /* ... same ... */
     module_id_suggestion: &str, bytecode_hash: &str, version: &str, wasm_bytecode: Vec<u8>,
 ) -> Result<String, String> {
     let module_id = if ACTIVE_MODULES.lock().unwrap().contains_key(module_id_suggestion) {
@@ -193,7 +194,7 @@ pub fn deploy_module( /* ... same as before ... */
     println!("[AetherCore] Wasm module '{}' successfully deployed.", module_id);
     Ok(module_id)
 }
-pub fn acknowledge_module_upgrade( /* ... same as before ... */
+pub fn acknowledge_module_upgrade( /* ... same ... */
     module_id: &str, new_version_info: &str, changes_hash: &str, new_bytecode: Option<Vec<u8>>,
 ) -> Result<(), String> {
     println!("[AetherCore] Acknowledging upgrade for module ID: '{}'. New version: '{}'. Changes hash: '{}'.",
