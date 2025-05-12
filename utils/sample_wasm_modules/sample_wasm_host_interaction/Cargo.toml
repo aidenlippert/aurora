@@ -1,0 +1,10 @@
+[package]
+name = "sample_wasm_host_interaction"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# No special dependencies needed for this simple example

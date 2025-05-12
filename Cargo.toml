@@ -86,7 +86,8 @@ members = [
     "risk_mitigation/stellarrisk_balancer_economic",
     "risk_mitigation/governancesafe_mechanisms",
     "risk_mitigation/ecoresilience_strategies", 
-    "utils/sample_wasm_modules/sample_wasm_module_add",
+    "utils/sample_wasm_modules/sample_wasm_module_add", 
+    "utils/sample_wasm_modules/sample_wasm_host_interaction",
 ]
 
 # Default build profile for release - optimize for size and speed

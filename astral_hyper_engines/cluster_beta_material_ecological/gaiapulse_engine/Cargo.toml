@@ -6,5 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+uuid = { version = "1.8.0", features = ["v4"] }
 novacarbon_markets = { path = "../../../ecological_synergy/novacarbon_markets" }
  # Add dependencies here

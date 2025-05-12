@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+chronoforge_simulator = { path = "../../omniverse_reality_simulation/chronoforge_simulator" }
+eonmirror_interface = { path = "../../omniverse_reality_simulation/eonmirror_interface" }
 wasmi = "0.31.2"
 cosmic_justice_enforcers = { path = "../../security_privacy_aegis/cosmic_justice_enforcers" }
 nebulashield_defenses = { path = "../../risk_mitigation/nebulashield_defenses" }
