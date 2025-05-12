@@ -34,10 +34,12 @@ dependencies = [
  "aethercore_runtime",
  "astrocli_deployment_nexus",
  "celestial_synapse_network_csn",
+ "chronoforge_simulator",
  "cosmic_data_constellation",
  "cosmic_justice_enforcers",
  "ecliptic_concordance",
  "econova_incentives",
+ "eonmirror_interface",
  "gaiapulse_engine",
  "hex",
  "nebula_pulse_swarm",
@@ -90,6 +92,10 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "chronoforge_simulator"
 version = "0.1.0"
+dependencies = [
+ "cosmic_data_constellation",
+ "uuid",
+]
 
 [[package]]
 name = "cosmic_data_constellation"
@@ -193,6 +199,10 @@ version = "0.1.0"
 [[package]]
 name = "eonmirror_interface"
 version = "0.1.0"
+dependencies = [
+ "cosmic_data_constellation",
+ "uuid",
+]
 
 [[package]]
 name = "etherweb_matrix"
@@ -207,6 +217,7 @@ name = "gaiapulse_engine"
 version = "0.1.0"
 dependencies = [
  "novacarbon_markets",
+ "uuid",
 ]
 
 [[package]]
