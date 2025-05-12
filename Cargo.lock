@@ -63,6 +63,7 @@ version = "0.1.0"
 name = "cosmic_data_constellation"
 version = "0.1.0"
 dependencies = [
+ "once_cell",
  "uuid",
 ]
 
@@ -123,6 +124,7 @@ version = "0.1.0"
 name = "ecliptic_concordance"
 version = "0.1.0"
 dependencies = [
+ "once_cell",
  "uuid",
 ]
 
@@ -258,6 +260,12 @@ version = "0.1.0"
 [[package]]
 name = "omnitrace_continuum"
 version = "0.1.0"
+
+[[package]]
+name = "once_cell"
+version = "1.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "ontological_codex"

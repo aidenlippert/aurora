@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+celestial_synapse_network_csn = { path = "../../sgs_foundations/celestial_synapse_network_csn" }
+novavault_flux_finance = { path = "../../astral_hyper_engines/cluster_alpha_economic_sovereign/novavault_flux_finance" }
 # Workspace dependencies (these paths are relative to this Cargo.toml)
 nebula_pulse_swarm = { path = "../../sgs_foundations/triad_web/nebula_pulse_swarm" }
 aethercore_runtime = { path = "../../sgs_foundations/aethercore_runtime" }
