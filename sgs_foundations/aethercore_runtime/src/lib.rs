@@ -67,7 +67,6 @@ impl HostState {
             self.host_gas_remaining = 0;
             let trap_msg = format!("Out of gas for host function in module {}!", self.module_id_for_log);
             println!("[HostState:Gas] {}", trap_msg);
-            // Create Trap with a String message
             self.host_function_trap = Some(Trap::new(trap_msg));
             Err(())
         }
@@ -155,10 +154,17 @@ pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, Stri
 
     let call_outcome = func.call(&mut store, &request.arguments, &mut results_buffer);
     
-    let wasm_fuel_consumed = store.fuel_consumed().unwrap_or(0);
+    let wasm_fuel_consumed_by_opcodes = match store.fuel_consumed() {
+        Some(fuel) => fuel,
+        None => 0, // Should not happen if add_fuel was called and successful
+    };
     let final_host_state = store.into_data();
-    let host_gas_consumed = request.gas_limit.saturating_sub(final_host_state.host_gas_remaining);
-    let total_gas_consumed = wasm_fuel_consumed + host_gas_consumed;
+    let host_gas_consumed_by_host_functions = request.gas_limit.saturating_sub(final_host_state.host_gas_remaining);
+    // total_gas_consumed needs to be careful not to double count if wasmi's fuel includes host calls already.
+    // For this mock, wasmi's `add_fuel` and `fuel_consumed` are for Wasm opcodes.
+    // Our `host_gas_remaining` is a separate counter for host function costs.
+    let total_gas_consumed = wasm_fuel_consumed_by_opcodes + host_gas_consumed_by_host_functions;
+
 
     match call_outcome {
         Ok(()) => {
@@ -170,15 +176,16 @@ pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, Stri
             Ok(ExecutionResult { output_values: results_buffer, gas_consumed_total: total_gas_consumed, success: true, logs: final_host_state.logs, error_message: None })
         }
         Err(wasmi_error) => {
-            let error_msg_str = final_host_state.host_function_trap.map_or_else(
+            let error_msg_str = final_host_state.host_function_trap.as_ref().map_or_else(
                 || format!("Wasm Error: {:?}", wasmi_error),
-                |trap| format!("Host function trap: {:?}",trap)
+                |trap_from_host| format!("Host function trap: {:?}",trap_from_host) // Prioritize host trap message
             );
-            // Corrected fuel exhaustion check
-            let final_gas_consumed = match &wasmi_error {
-                WasmiError::Trap(t) if t.trap_code() == Some(TrapCode::OutOfFuel) => request.gas_limit,
-                _ if final_host_state.host_function_trap.is_some() => request.gas_limit, // Assuming host trap also means all gas used
-                _ => total_gas_consumed,
+            
+            // Corrected fuel exhaustion check using matches!
+            let final_gas_consumed = if matches!(&wasmi_error, WasmiError::Trap(t) if matches!(t.trap_code(), Some(TrapCode::OutOfFuel))) || final_host_state.host_function_trap.is_some() {
+                request.gas_limit 
+            } else {
+                total_gas_consumed 
             };
 
             eprintln!("[AetherCore] Wasm TRAP/Error for '{}': {}. FinalGasConsumed: {}", request.module_id, error_msg_str, final_gas_consumed);
