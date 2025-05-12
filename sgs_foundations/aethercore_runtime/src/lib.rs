@@ -5,12 +5,11 @@ use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
-// Wasmi imports - Corrected Trap and TrapCode import
 use wasmi::{
     Engine, Module, Store, Linker, Caller, Instance, Extern, Value, AsContextMut, Error as WasmiError,
     Memory, MemoryType
 };
-use wasmi::core::{Trap, TrapCode}; // Import Trap and TrapCode from wasmi::core
+use wasmi::core::{Trap, TrapCode};
 
 #[derive(Debug, Clone)]
 pub struct DeployedModuleInfo {
@@ -66,8 +65,10 @@ impl HostState {
             Ok(())
         } else {
             self.host_gas_remaining = 0;
-            println!("[HostState:Gas] Out of host gas for module {}!", self.module_id_for_log);
-            self.host_function_trap = Some(Trap::new(TrapCode::UnreachableCodeReached));
+            let trap_msg = format!("Out of gas for host function in module {}!", self.module_id_for_log);
+            println!("[HostState:Gas] {}", trap_msg);
+            // Create Trap with a String message
+            self.host_function_trap = Some(Trap::new(trap_msg));
             Err(())
         }
     }
@@ -77,11 +78,19 @@ fn host_log_message_adapter(mut caller: Caller<'_, HostState>, ptr: u32, len: u3
     if caller.data_mut().consume_host_gas(10).is_err() { return; }
     let memory = match caller.get_export("memory") {
         Some(Extern::Memory(mem)) => mem,
-        _ => { println!("[HostFuncError] 'memory' export not found for logging."); return; }
+        _ => { 
+            let trap_msg = "[HostFuncError] 'memory' export not found for logging.".to_string();
+            println!("{}", trap_msg);
+            caller.data_mut().host_function_trap = Some(Trap::new(trap_msg));
+            return; 
+        }
     };
     let mut buffer = vec![0u8; len as usize];
     if memory.read(&caller, ptr as usize, &mut buffer).is_err() {
-        println!("[HostFuncError] Failed to read Wasm memory for logging."); return;
+        let trap_msg = "[HostFuncError] Failed to read Wasm memory for logging.".to_string();
+        println!("{}", trap_msg);
+        caller.data_mut().host_function_trap = Some(Trap::new(trap_msg));
+        return;
     }
     match String::from_utf8(buffer) {
         Ok(message_str) => {
@@ -89,7 +98,12 @@ fn host_log_message_adapter(mut caller: Caller<'_, HostState>, ptr: u32, len: u3
             println!("{}", log_entry);
             caller.data_mut().logs.push(log_entry);
         }
-        Err(_) => { println!("[HostFuncError] Log message not valid UTF-8."); return; }
+        Err(_) => { 
+            let trap_msg = "[HostFuncError] Log message not valid UTF-8.".to_string();
+            println!("{}", trap_msg);
+            caller.data_mut().host_function_trap = Some(Trap::new(trap_msg));
+            return;
+        }
     }
 }
 
@@ -161,10 +175,10 @@ pub fn execute_module(request: ExecutionRequest) -> Result<ExecutionResult, Stri
                 |trap| format!("Host function trap: {:?}",trap)
             );
             // Corrected fuel exhaustion check
-            let final_gas_consumed = if matches!(wasmi_error, WasmiError::Trap(ref t) if t.trap_code() == Some(TrapCode::OutOfFuel)) || final_host_state.host_function_trap.is_some() {
-                request.gas_limit 
-            } else {
-                total_gas_consumed 
+            let final_gas_consumed = match &wasmi_error {
+                WasmiError::Trap(t) if t.trap_code() == Some(TrapCode::OutOfFuel) => request.gas_limit,
+                _ if final_host_state.host_function_trap.is_some() => request.gas_limit, // Assuming host trap also means all gas used
+                _ => total_gas_consumed,
             };
 
             eprintln!("[AetherCore] Wasm TRAP/Error for '{}': {}. FinalGasConsumed: {}", request.module_id, error_msg_str, final_gas_consumed);
