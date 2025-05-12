@@ -9,18 +9,14 @@ use verifiable_obligation_nexus_von as von;
 use gaiapulse_engine::process_green_operation_attestation;
 use econova_incentives::calculate_and_distribute_fluxboost_reward;
 use astrocli_deployment_nexus::{compile_dapp_mock, request_dapp_deployment, MockDappCompilation};
-// use primeaxiom_vault::CodeToCheck; // Unused, can be removed by cargo fix
+use primeaxiom_vault::CodeToCheck;
 use nexus_cosmic_introspection_nci::generate_integrity_report;
 use nebulashield_defenses::OperationTrace;
-// use nebulashield_defenses::AnomalyType; // Unused, can be removed by cargo fix
 use cosmic_justice_enforcers::MisbehaviorType;
-// use cosmic_justice_enforcers::apply_penalty_for_misbehavior; // Unused, called via module name
-
 use eonmirror_interface::{ingest_real_world_data, RealWorldDataPoint};
 use chronoforge_simulator::generate_prediction_from_isn_data;
-// use chronoforge_simulator::Prediction; // Unused, can be removed by cargo fix
 use gaiapulse_engine::react_to_environmental_prediction;
-use semantic_synapse_interfaces; // Corrected import
+use semantic_synapse_interfaces; // For query_isn
 
 use wasmi::Value;
 use std::collections::HashMap;
@@ -43,19 +39,20 @@ fn run_financial_simulation_phase(user_did: &str, block_height: u64) {
     let private_inputs_data = b"{\"actual_recipient_encrypted_id\":\"enc_cosmic_789\", \"actual_amount_encrypted\": \"enc_150AUC\"}".to_vec();
     let initiated_op = nebula_pulse_swarm::initiate_operation(user_did, "PrivateTransferAUC_HyperEngine", format!("{:?}", public_payload_details).into_bytes()).expect("Op init failed");
     println!("  -> NebulaPulse: Initiated op: Type '{}', Originator '{}'", initiated_op.operation_type, initiated_op.originator_id);
-    nebula_pulse_swarm::send_data_to_edge(&initiated_op).expect("Send to edge failed");
+    let _ = nebula_pulse_swarm::package_and_send_to_edge(&initiated_op.originator_id, initiated_op.clone()).expect("Send to edge failed"); // Using new packaging function
     let csn_suggested_fee = csn::get_dynamic_fee_for_novavault("PrivateTransferAUC").unwrap_or(15);
     println!("  -> CSN: Suggested fee: {} micro-AUC", csn_suggested_fee);
     let mut full_public_payload = public_payload_details.clone();
     full_public_payload.insert("fee_paid".to_string(), csn_suggested_fee.to_string());
     let financial_op_result: FinancialOperation = novavault_flux_finance::process_financial_operation(user_did, NovaVaultOpType::PrivateTransferAUC, full_public_payload, private_inputs_data.clone(), block_height).expect("NV process failed");
     if let Some(ref _proof) = financial_op_result.zk_proof { stl::update_trust_score(user_did, stl::FINANCIAL_CONTEXT, 0.05, "Generated ZKP"); }
+    
     let exec_req = ExecutionRequest { module_id: "private_auc_handler_v1".to_string(), function_name: "log_private_op_intent".to_string(), arguments: Vec::new(), gas_limit: 500 };
     if let Ok(exec_res) = aethercore_runtime::execute_module(exec_req) { 
         println!("  -> AetherCore (Legacy): Executed. Success: {}, Output: {:?}, GasConsumed: {}", 
                  exec_res.success, 
                  exec_res.output_values.get(0).map_or_else(|| "None".to_string(), |v| format!("{:?}", v)),
-                 exec_res.gas_consumed_total // Corrected field name
+                 exec_res.gas_consumed_total
         ); 
     }
     let op_hash = mock_hash_data(&financial_op_result.payload);
@@ -121,8 +118,7 @@ fn run_ecological_simulation_phase(green_validator_did: &str, block_height: u64)
 
 fn run_developer_deployment_phase(developer_did: &str, block_height: u64, wasm_module_crate_name: &str) -> Option<String> {
     println!("\n--- Running Developer Deployment Simulation Phase for DID {} (Wasm Crate: {}) ---", developer_did, wasm_module_crate_name);
-    let wasm_base_path_for_loading = "";
-    let compilation_output: MockDappCompilation = match compile_dapp_mock(wasm_module_crate_name, developer_did, wasm_base_path_for_loading) {
+    let compilation_output: MockDappCompilation = match compile_dapp_mock(wasm_module_crate_name, developer_did, "") {
         Ok(comp) => comp, Err(e) => { eprintln!("[DevSim] DApp Wasm loading/compilation failed for '{}': {}", wasm_module_crate_name, e); return None; }
     };
     println!("  -> AstroCLI: DApp '{}' (from crate {}) \"compiled\". Wasm Bytecode Hash: {}. Bytecode size: {}",
@@ -131,26 +127,26 @@ fn run_developer_deployment_phase(developer_did: &str, block_height: u64, wasm_m
         Ok(deployed_module_id) => {
             println!("  -> AstroCLI: DApp '{}' deployment successful. Deployed (AetherCore) Module ID: '{}'", compilation_output.dapp_name, deployed_module_id);
             stl::update_trust_score(developer_did, stl::GOVERNANCE_CONTEXT, 0.1, &format!("Successfully deployed DApp: {}", compilation_output.dapp_name));
-            let gas_limit_for_dapp_exec = 10000;
+            let gas_limit_for_dapp_exec = 10000; // Increased gas limit for Wasm
             if deployed_module_id == "sample_wasm_module_add" {
                 println!("\n  --- Attempting to execute Wasm DApp '{}' (function: add) ---", deployed_module_id);
                 let exec_req = ExecutionRequest { module_id: deployed_module_id.clone(), function_name: "add".to_string(), arguments: vec![Value::I32(700), Value::I32(52)], gas_limit: gas_limit_for_dapp_exec };
                 if let Ok(res) = aethercore_runtime::execute_module(exec_req) { 
                     println!("  -> AetherCore (sample_add): Success: {}, Output: {:?}, GasConsumed: {}, Logs: {:?}", 
-                             res.success, res.output_values, res.gas_consumed_total, res.logs); // Corrected
+                             res.success, res.output_values, res.gas_consumed_total, res.logs); 
                 }
             } else if deployed_module_id == "sample_wasm_host_interaction" {
                 println!("\n  --- Attempting to execute Wasm DApp '{}' (function: perform_action_and_log) ---", deployed_module_id);
                 let exec_req_log = ExecutionRequest { module_id: deployed_module_id.clone(), function_name: "perform_action_and_log".to_string(), arguments: Vec::new(), gas_limit: gas_limit_for_dapp_exec };
                 if let Ok(res) = aethercore_runtime::execute_module(exec_req_log) { 
                     println!("  -> AetherCore (host_log): Success: {}, Output: {:?}, GasConsumed: {}, Logs: {:?}", 
-                             res.success, res.output_values, res.gas_consumed_total, res.logs); // Corrected
+                             res.success, res.output_values, res.gas_consumed_total, res.logs); 
                 }
                 println!("\n  --- Attempting to execute Wasm DApp '{}' (function: process_and_log_value) ---", deployed_module_id);
                 let exec_req_val = ExecutionRequest { module_id: deployed_module_id.clone(), function_name: "process_and_log_value".to_string(), arguments: vec![Value::I32(155)], gas_limit: gas_limit_for_dapp_exec };
                 if let Ok(res) = aethercore_runtime::execute_module(exec_req_val) { 
                     println!("  -> AetherCore (host_val_log): Success: {}, Output: {:?}, GasConsumed: {}, Logs: {:?}", 
-                             res.success, res.output_values, res.gas_consumed_total, res.logs); // Corrected
+                             res.success, res.output_values, res.gas_consumed_total, res.logs);
                 }
             }
             Some(deployed_module_id)
@@ -172,7 +168,6 @@ fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str
     if let Some(anomaly) = nebulashield_defenses::detect_anomalous_operation(&trace) {
         println!("  -> NebulaShield: Anomaly {:?} detected for module '{}'.", anomaly, normal_dapp_module_id);
         let misbehavior = MisbehaviorType::AnomalyDetected(format!("{:?}", anomaly));
-        // Call directly using crate name
         if let Ok(()) = cosmic_justice_enforcers::apply_penalty_for_misbehavior(normal_dapp_module_id, misbehavior, 3, block_height + 1) { println!("  -> CosmicJustice: Penalty applied for anomalous op of module '{}'.", normal_dapp_module_id); }
         let _ = generate_integrity_report(normal_dapp_module_id, "DAppRuntimeAnomaly", vec![format!("Anomaly detected: {:?}", anomaly)], 3, vec!["Quarantine module.".to_string()], block_height + 1);
     } else { println!("  -> NebulaShield: No anomaly detected for module '{}'.", normal_dapp_module_id); }
@@ -202,11 +197,11 @@ fn run_reality_sync_prediction_phase(sensor_operator_did: &str, block_height: u6
     }
 }
 
-fn run_isn_graph_query_phase(developer_did: &str, block_height: u64) { /* Omitted - same */
+fn run_isn_graph_query_phase(developer_did: &str, block_height: u64) {
     println!("\n--- Running ISN Graph Query Simulation Phase for Developer {} ---", developer_did);
-    let query_str = format!("GET_LINKED_NODES_FOR {} RELATIONSHIP deployed_module", developer_did); // Using developer_did as node ID
+    let query_str = format!("GET_LINKED_NODES_FOR {} RELATIONSHIP deployed_module", developer_did);
     println!("  -> ISN Query: {}", query_str);
-    match semantic_synapse_interfaces::query_isn(&query_str) { // Corrected: use crate name directly
+    match semantic_synapse_interfaces::query_isn(&query_str) { // Corrected: Use crate name directly
         Ok(result) => { println!("  -> ISN Query Result (Modules deployed by {}): {}", developer_did, result.data_json); }
         Err(e) => eprintln!("  -> ISN Query Error: {}", e),
     }
@@ -235,7 +230,7 @@ fn main() {
     run_ecological_simulation_phase(&voter_alpha_did, get_next_mock_block_height());
     
     let deployed_adder_module_id = run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "sample_wasm_module_add")
-        .unwrap_or_else(|| "sample_wasm_module_add".to_string()); // Fallback ID if deployment fails
+        .unwrap_or_else(|| "sample_wasm_module_add".to_string());
     run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "sample_wasm_host_interaction");
     
     run_reality_sync_prediction_phase(&voter_alpha_did, get_next_mock_block_height());
