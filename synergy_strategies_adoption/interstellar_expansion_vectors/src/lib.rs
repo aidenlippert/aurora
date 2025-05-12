@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! Interstellar Expansion Vectors: Cosmic Network Horizons.
 
 // Logic for VoidStar Relays and AstroPioneer Collectives.
 
-pub fn establish_voidstar_relay(target_celestial_body: &str) -> Result<(), String> { Err("Not implemented".to_string()) }\npub fn form_astropioneer_collective(colony_id: &str, governance_model: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn establish_voidstar_relay(target_celestial_body: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn form_astropioneer_collective(colony_id: &str, governance_model: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

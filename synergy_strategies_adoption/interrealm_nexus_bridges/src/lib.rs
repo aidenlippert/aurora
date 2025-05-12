@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! InterRealm Nexus: Cross-Platform Cosmic Bridges.
 
 // Logic for StarBridge Protocols and TrustSync Relays.
 
-pub fn bridge_asset_to_external_chain(asset_id: &str, target_chain: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn relay_trust_score(user_id: &str, target_chain: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn bridge_asset_to_external_chain(asset_id: &str, target_chain: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn relay_trust_score(user_id: &str, target_chain: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {
