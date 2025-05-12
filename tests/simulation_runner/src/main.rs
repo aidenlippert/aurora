@@ -10,11 +10,11 @@ use gaiapulse_engine::process_green_operation_attestation;
 use econova_incentives::calculate_and_distribute_fluxboost_reward;
 use astrocli_deployment_nexus::{compile_dapp_mock, request_dapp_deployment, MockDappCompilation};
 
-// Corrected imports for Risk & Ethics phase
-use primeaxiom_vault::CodeToCheck; // check_code_against_axioms is called via module
-use nexus_cosmic_introspection_nci::generate_integrity_report; // scan_dapp_code_for_risks is called via module
-use nebulashield_defenses::{OperationTrace, AnomalyType}; // detect_anomalous_operation is called via module
-use cosmic_justice_enforcers::{apply_penalty_for_misbehavior, MisbehaviorType}; // Corrected: use crate name
+// Corrected imports for Risk & Ethics phase (only used ones)
+// primeaxiom_vault::check_code_against_axioms is called via starforge_grants
+use nexus_cosmic_introspection_nci::generate_integrity_report;
+use nebulashield_defenses::{OperationTrace}; // AnomalyType and detect_anomalous_operation are used via module
+use cosmic_justice_enforcers::MisbehaviorType; // apply_penalty_for_misbehavior is called via module
 
 use wasmi::Value;
 
@@ -108,25 +108,28 @@ fn run_ecological_simulation_phase(green_validator_did: &str, block_height: u64)
     if let Ok(Some(boost)) = calculate_and_distribute_fluxboost_reward(green_validator_did, 100, &op_id_for_reward, block_height) { println!("  -> EcoNova: FluxBoost of {} distributed.", boost); }
 }
 
-// Corrected: run_developer_deployment_phase now takes 3 arguments
+// Corrected: run_developer_deployment_phase now takes wasm_module_crate_name for loading path
 fn run_developer_deployment_phase(developer_did: &str, block_height: u64, wasm_module_crate_name: &str) {
-    println!("\n--- Running Developer Deployment Simulation Phase for DID {} (DApp Crate: {}) ---", developer_did, wasm_module_crate_name);
+    println!("\n--- Running Developer Deployment Simulation Phase for DID {} (Wasm Crate: {}) ---", developer_did, wasm_module_crate_name);
     
-    let compilation_output: MockDappCompilation = match compile_dapp_mock(wasm_module_crate_name, developer_did, ".") {
+    // Path for loading actual Wasm files (relative to aurora project root)
+    let wasm_base_path = "utils/sample_wasm_modules";
+
+    let compilation_output: MockDappCompilation = match compile_dapp_mock(wasm_module_crate_name, developer_did, wasm_base_path) {
         Ok(comp) => comp,
-        Err(e) => { eprintln!("[DevSim] DApp Wasm loading failed for '{}': {}", wasm_module_crate_name, e); return; }
+        Err(e) => { eprintln!("[DevSim] DApp Wasm loading/compilation failed for '{}': {}", wasm_module_crate_name, e); return; }
     };
     println!("  -> AstroCLI: DApp '{}' (from crate {}) \"compiled\". Wasm Bytecode Hash: {}. Bytecode size: {}",
         compilation_output.dapp_name, wasm_module_crate_name, compilation_output.mock_wasm_bytecode_hash, compilation_output.wasm_bytecode.len());
 
     let deployment_target = "AetherCore_Main_Shard_Group_Alpha";
-    // The dapp_name to pass to request_dapp_deployment is derived inside compile_dapp_mock now
     match request_dapp_deployment(compilation_output.clone(), deployment_target, block_height) {
         Ok(deployed_module_id) => {
             println!("  -> AstroCLI: DApp '{}' deployment successful. Deployed (AetherCore) Module ID: '{}'", compilation_output.dapp_name, deployed_module_id);
             stl::update_trust_score(developer_did, stl::GOVERNANCE_CONTEXT, 0.1, &format!("Successfully deployed DApp: {}", compilation_output.dapp_name));
 
-            if compilation_output.dapp_name == "sample_wasm_module_add" { // Check against the actual module name AetherCore will register
+            // Only attempt to execute if it's the sample_wasm_module_add and it was successfully deployed
+            if compilation_output.dapp_name == "sample_wasm_module_add" {
                 println!("\n  --- Attempting to execute newly deployed Wasm DApp '{}' (function: add) ---", deployed_module_id);
                 let exec_request = ExecutionRequest {
                     module_id: deployed_module_id.clone(),
@@ -152,14 +155,17 @@ fn run_developer_deployment_phase(developer_did: &str, block_height: u64, wasm_m
 fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str, normal_dapp_module_id: &str, block_height: u64) {
     println!("\n--- Running Risk Mitigation & Ethical Oversight Simulation Phase ---");
 
-    println!("\n  Scenario 1: Developer '{}' attempts to deploy 'malicious_dapp_attempt' (as Wasm)...", malicious_dev_did);
-    // Pass the DApp name that will trigger the malicious check in PrimeAxiom/NCI via StarForgeGrants
+    println!("\n  Scenario 1: Developer '{}' attempts to deploy 'malicious_dapp_attempt' (name triggers ethical check)...", malicious_dev_did);
+    // For "malicious_dapp_attempt", compile_dapp_mock will generate empty/mock bytecode,
+    // but the ethical checks in starforge_grants (via primeaxiom_vault) will use the name.
     run_developer_deployment_phase(malicious_dev_did, block_height, "malicious_dapp_attempt");
 
-    println!("\n  Scenario 2: Developer '{}' attempts to deploy 'risky_dapp_code' (as Wasm)...", risky_dev_did);
+    println!("\n  Scenario 2: Developer '{}' attempts to deploy 'risky_dapp_code' (name triggers NCI scan)...", risky_dev_did);
     run_developer_deployment_phase(risky_dev_did, block_height, "risky_dapp_code");
 
     println!("\n  Scenario 3: Deployed DApp '{}' performs an anomalous operation...", normal_dapp_module_id);
+    // Ensure normal_dapp_module_id refers to an actually deployed module, e.g., "sample_wasm_module_add"
+    // if its deployment was successful earlier.
     let trace = OperationTrace {
         module_id: normal_dapp_module_id.to_string(),
         function_name: "critical_function_with_exploit_log".to_string(),
@@ -168,11 +174,10 @@ fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str
         return_value_hash: mock_hash_data(&"anomalous_output"),
     };
 
-    // Directly use nebulashield_defenses here
     if let Some(anomaly) = nebulashield_defenses::detect_anomalous_operation(&trace) {
         println!("  -> NebulaShield: Anomaly {:?} detected for module '{}'.", anomaly, normal_dapp_module_id);
         let misbehavior = MisbehaviorType::AnomalyDetected(format!("{:?}", anomaly));
-        // Use cosmic_justice_enforcers directly
+        // Call directly using crate name
         match cosmic_justice_enforcers::apply_penalty_for_misbehavior(normal_dapp_module_id, misbehavior, 3, block_height + 1) {
             Ok(()) => println!("  -> CosmicJustice: Penalty applied for anomalous op of module '{}'.", normal_dapp_module_id),
             Err(e) => eprintln!("  -> CosmicJustice: Error applying penalty: {}", e),
@@ -184,7 +189,7 @@ fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str
             block_height + 1
         );
     } else {
-         println!("  -> NebulaShield: No anomaly detected for module '{}' in this specific trace.", normal_dapp_module_id);
+         println!("  -> NebulaShield: No anomaly detected for module '{}' in this specific trace (normal_dapp_module_id: {}).", normal_dapp_module_id, normal_dapp_module_id);
     }
 }
 
@@ -210,11 +215,14 @@ fn main() {
     run_von_simulation_phase(&user_punk_did, &obligee_did_str, get_next_mock_block_height());
     run_ecological_simulation_phase(&voter_alpha_did, get_next_mock_block_height());
     
-    // Deploy the actual sample Wasm module; the second argument is the crate name for wasm loading
+    // Deploy the actual sample Wasm module; its crate name is "sample_wasm_module_add"
     run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "sample_wasm_module_add");
     
-    // For the risk simulation, use the DApp name that AetherCore would register it under.
+    // For the risk simulation, the normal_dapp_module_id should be the ID AetherCore assigned
+    // to sample_wasm_module_add. Since compile_dapp_mock and deploy_module use the crate name
+    // as the suggestion, it will likely be "sample_wasm_module_add" if not taken.
     run_risk_ethics_simulation_phase(&malicious_dev_did, &risky_dev_did, "sample_wasm_module_add", get_next_mock_block_height());
+
 
     println!("\n--- Final Mock STL Scores ---");
     for did_str in [&user_punk_did, &dev_aurora_did, &voter_alpha_did, &dapp_developer_did, &malicious_dev_did, &risky_dev_did].iter() {
