@@ -81,6 +81,7 @@ members = [
     "synergy_strategies_adoption/interstellar_expansion_vectors",
 
     # Risk Mitigation
+    "tests/simulation_runner",
     "risk_mitigation/nebulashield_defenses",
     "risk_mitigation/stellarrisk_balancer_economic",
     "risk_mitigation/governancesafe_mechanisms",

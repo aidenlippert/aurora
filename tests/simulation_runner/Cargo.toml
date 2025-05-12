@@ -1,0 +1,16 @@
+[package]
+name = "aurora_simulation_runner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Workspace dependencies (these paths are relative to this Cargo.toml)
+nebula_pulse_swarm = { path = "../../sgs_foundations/triad_web/nebula_pulse_swarm" }
+aethercore_runtime = { path = "../../sgs_foundations/aethercore_runtime" }
+ecliptic_concordance = { path = "../../sgs_foundations/ecliptic_concordance" }
+cosmic_data_constellation = { path = "../../knowledge_nexus_isn/cosmic_data_constellation" }
+
+# Utility for hashing
+use_serde = { package = "serde", version = "1.0", features = ["derive"] } # Renaming to avoid conflict if serde is used directly
+sha2 = "0.10.8"
+hex = "0.4.3"
