@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! Ecliptic Concordance: Quantum-Resilient Consensus Hyperledger.
 
 // Implements Aurora's consensus: Triune Sentinels, ChronoGraph Pre-Sync, Temporal Vortex Functions, Synapse AI Calibration, NebulaGuard Protocols.
 
-pub fn submit_transaction(tx_bytes: &[u8]) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn get_block_finality(block_hash: &str) -> Result<bool, String> { Err("Not implemented".to_string()) }
+pub fn submit_transaction(tx_bytes: &[u8]) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn get_block_finality(block_hash: &str) -> Result<bool, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

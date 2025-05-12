@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! AetherCore Runtime: The Universal Wasm Execution Forge for Aurora.
 
 // Placeholder for Wasm execution logic, module loading, sandboxing, and gas metering.
 
-pub fn execute_wasm(module_id: &str, function_name: &str, args: &[u8]) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }\npub fn deploy_module(module_bytes: &[u8]) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn execute_wasm(module_id: &str, function_name: &str, args: &[u8]) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }
+pub fn deploy_module(module_bytes: &[u8]) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

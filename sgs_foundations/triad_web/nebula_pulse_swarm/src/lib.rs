@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! NebulaPulse Swarm: Sentient Mobile Vortex (Tier 1 Network).
 
 // Handles P2P communication for mobile/IoT devices. Includes AetherCore Runtime, NovaLink AI, StarStream Protocol, Synaptic Governor, PhantomShield.
 
-pub fn connect_peer(peer_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }\npub fn send_data(peer_id: &str, data: &[u8]) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn connect_peer(peer_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn send_data(peer_id: &str, data: &[u8]) -> Result<(), String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

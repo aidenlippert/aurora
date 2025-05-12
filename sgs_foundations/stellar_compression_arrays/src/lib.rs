@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! Stellar Compression Arrays: Infinite Scalability Prisms.
 
 // Handles sharding scalability: ShardSync Holograms, Cosmic Merkle Fusion, Photon Client Verifiers.
 
-pub fn get_shard_state_commitment(shard_id: &str) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }\npub fn verify_state_with_photon_client(proof_bytes: &[u8]) -> Result<bool, String> { Err("Not implemented".to_string()) }
+pub fn get_shard_state_commitment(shard_id: &str) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }
+pub fn verify_state_with_photon_client(proof_bytes: &[u8]) -> Result<bool, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

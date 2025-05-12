@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! Celestial Synapse Network (CSN): Sentient AI Overmind.
 
 // AI orchestration layer: OmniCycle Framework, FluxDynamo Regulator, Quantum Neural Federation, Ethereal Oversight.
 
-pub fn optimize_resource_allocation() -> Result<(), String> { Err("Not implemented".to_string()) }\npub fn predict_system_load() -> Result<f64, String> { Err("Not implemented".to_string()) }
+pub fn optimize_resource_allocation() -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn predict_system_load() -> Result<f64, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

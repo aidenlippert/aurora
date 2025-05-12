@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! Graviton Edge: Cosmic Shard Orchestrators (Tier 2 Network).
 
 // Manages resilient infrastructure hubs (FluxGate Nodes), adaptive shard topology (AstroCluster Dynamics), and cryptographic validation (ZeroProof Accelerators).
 
-pub fn orchestrate_shard(shard_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }\npub fn get_fluxgate_node_status(node_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn orchestrate_shard(shard_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn get_fluxgate_node_status(node_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {
