@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 hex = "0.4"
 sha2 = "0.10"
-voidproof_engine_zkp = { path = "../../../../security_privacy_aegis/voidproof_engine_zkp" }
+voidproof_engine_zkp = { path = "../../../security_privacy_aegis/voidproof_engine_zkp" }
  # Add dependencies here
 cosmic_data_constellation = { path = "../../../knowledge_nexus_isn/cosmic_data_constellation" }
 semantic_synapse_interfaces = { path = "../../../knowledge_nexus_isn/semantic_synapse_interfaces" }
