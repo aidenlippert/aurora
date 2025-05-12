@@ -32,7 +32,10 @@ dependencies = [
  "oraclesync_futarchy",
  "serde",
  "sha2",
+ "soulstar_matrix_identity",
  "starsenate_collectives_governance",
+ "symbiotic_trust_lattice_stl",
+ "verifiable_obligation_nexus_von",
  "voidproof_engine_zkp",
 ]
 
@@ -357,6 +360,11 @@ dependencies = [
 [[package]]
 name = "soulstar_matrix_identity"
 version = "0.1.0"
+dependencies = [
+ "cosmic_data_constellation",
+ "once_cell",
+ "uuid",
+]
 
 [[package]]
 name = "starforge_grants"
@@ -369,6 +377,7 @@ dependencies = [
  "cosmic_data_constellation",
  "once_cell",
  "oraclesync_futarchy",
+ "symbiotic_trust_lattice_stl",
  "uuid",
 ]
 
@@ -383,6 +392,10 @@ version = "0.1.0"
 [[package]]
 name = "symbiotic_trust_lattice_stl"
 version = "0.1.0"
+dependencies = [
+ "once_cell",
+ "uuid",
+]
 
 [[package]]
 name = "syn"
@@ -431,6 +444,11 @@ dependencies = [
 [[package]]
 name = "verifiable_obligation_nexus_von"
 version = "0.1.0"
+dependencies = [
+ "cosmic_data_constellation",
+ "once_cell",
+ "uuid",
+]
 
 [[package]]
 name = "veritasbeacon_network"

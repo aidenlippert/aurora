@@ -6,4 +6,5 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+novacarbon_markets = { path = "../../../ecological_synergy/novacarbon_markets" }
  # Add dependencies here

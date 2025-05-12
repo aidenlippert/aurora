@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+econova_incentives = { path = "../../governance_economy/econova_incentives" }
+gaiapulse_engine = { path = "../../astral_hyper_engines/cluster_beta_material_ecological/gaiapulse_engine" }
 verifiable_obligation_nexus_von = { path = "../../trust_obligation_stl_von/verifiable_obligation_nexus_von" }
 symbiotic_trust_lattice_stl = { path = "../../trust_obligation_stl_von/symbiotic_trust_lattice_stl" }
 soulstar_matrix_identity = { path = "../../astral_hyper_engines/cluster_alpha_economic_sovereign/soulstar_matrix_identity" }
