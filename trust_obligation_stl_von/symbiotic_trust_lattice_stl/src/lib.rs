@@ -13,9 +13,9 @@ static TRUST_SCORES_DB: Lazy<Mutex<HashMap<String, HashMap<String, f64>>>> = Laz
 });
 
 // Default score for new entities or unrated contexts
-const DEFAULT_TRUST_SCORE: f64 = 0.5;
-const GOVERNANCE_CONTEXT: &str = "governance_participation";
-const FINANCIAL_CONTEXT: &str = "financial_reliability";
+pub const DEFAULT_TRUST_SCORE: f64 = 0.5; // Make public
+pub const GOVERNANCE_CONTEXT: &str = "governance_participation"; // Make public
+pub const FINANCIAL_CONTEXT: &str = "financial_reliability";   // Make public
 
 pub fn initialize_entity_trust(did: &str) {
     let mut scores_db = TRUST_SCORES_DB.lock().unwrap();
