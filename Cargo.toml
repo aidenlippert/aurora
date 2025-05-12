@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "2" # Using resolver version 2
 members = [
     # SGS Foundations
     "sgs_foundations/aethercore_runtime",
@@ -94,3 +94,6 @@ codegen-units = 1     # Maximize optimizations
 panic = "abort"       # Abort on panic for smaller binaries
 strip = true          # Strip symbols from binary
 opt-level = "z"       # Optimize for size ("s" is also good, "z" is more aggressive)
+
+# Optional: Specify default-run for the workspace if you have a main binary
+# default-run = "my_main_aurora_binary_crate"
