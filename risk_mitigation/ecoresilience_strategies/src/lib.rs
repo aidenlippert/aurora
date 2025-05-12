@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! EcoResilience Strategies: Environmental Risk Safeguards.
 
 // Logic for GreenPulse Monitors and EcoVault Reserves.
 
-pub fn monitor_carbon_footprint_with_greenpulse() -> Result<f64, String> { Err("Not implemented".to_string()) }\npub fn access_ecovault_reserves_for_contingency(event_id: &str) -> Result<u64, String> { Err("Not implemented".to_string()) }
+pub fn monitor_carbon_footprint_with_greenpulse() -> Result<f64, String> { Err("Not implemented".to_string()) }
+pub fn access_ecovault_reserves_for_contingency(event_id: &str) -> Result<u64, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

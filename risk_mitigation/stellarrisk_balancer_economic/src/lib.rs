@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! StellarRisk Balancer: Economic Stability Guardians.
 
 // Logic for NovaStabilizer Protocols and CosmicInsurance Pools.
 
-pub fn apply_novastabilizer_adjustment(economic_indicator: &str, value: f64) -> Result<(), String> { Err("Not implemented".to_string()) }\npub fn create_cosmic_insurance_pool(risk_category: &str, coverage_terms: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn apply_novastabilizer_adjustment(economic_indicator: &str, value: f64) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn create_cosmic_insurance_pool(risk_category: &str, coverage_terms: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

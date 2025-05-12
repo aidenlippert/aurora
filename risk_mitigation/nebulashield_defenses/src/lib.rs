@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! NebulaShield Defenses: Proactive Threat Neutralization.
 
 // Logic for VoidSentry Algorithms and FluxGuard Redundancy.
 
-pub fn detect_adversarial_attack(data_stream_id: &str) -> Result<Option<String>, String> { Err("Not implemented".to_string()) }\npub fn activate_fluxguard_failover(service_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn detect_adversarial_attack(data_stream_id: &str) -> Result<Option<String>, String> { Err("Not implemented".to_string()) }
+pub fn activate_fluxguard_failover(service_id: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {
