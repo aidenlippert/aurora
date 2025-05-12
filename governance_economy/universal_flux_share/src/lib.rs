@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! Universal Flux Share: Inclusive Cosmic Security.
 
 // Implements OmniStake Protocol and ActivityPulse Rewards.
 
-pub fn stake_auc_for_ufs(user_id: &str, amount: u64) -> Result<(), String> { Err("Not implemented".to_string()) }\npub fn distribute_activity_pulse_rewards() -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn stake_auc_for_ufs(user_id: &str, amount: u64) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn distribute_activity_pulse_rewards() -> Result<(), String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

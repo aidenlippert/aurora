@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! OracleSync Futarchy: Predictive Cosmic Sovereignty.
 
 // Manages StarMarkets and integrates with TrustPulse Voting.
 
-pub fn create_prediction_market(proposal_id: &str, question: &str) -> Result<String, String> { Err("Not implemented".to_string()) }\npub fn get_market_outcome(market_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn create_prediction_market(proposal_id: &str, question: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
+pub fn get_market_outcome(market_id: &str) -> Result<String, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {
