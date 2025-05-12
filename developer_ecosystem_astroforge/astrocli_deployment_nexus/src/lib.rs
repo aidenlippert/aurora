@@ -1,21 +1,25 @@
 #![allow(unused_variables, dead_code, unused_imports)]
 //! AstroCLI & Deployment Nexus: Streamlined Creation Flow.
 use std::collections::HashMap;
-// Import MockWasmInstruction from aethercore_runtime
 use aethercore_runtime::{deploy_module as aethercore_deploy_module, MockWasmInstruction};
 use starforge_grants::approve_deployment_request;
 use cosmic_data_constellation::{IsnNode, record_module_deployment};
 
+// Import Digest trait for sha2
+use sha2::{Sha256, Digest}; // Added Digest here
+use hex;
+use uuid; // Make sure uuid is explicitly used if needed at this level, or ensure it's a dep
+
 #[derive(Debug, Clone)]
 pub struct MockDappCompilation {
     pub dapp_name: String,
-    pub mock_wasm_bytecode_hash: String, // Hash of the conceptual original source
+    pub mock_wasm_bytecode_hash: String,
     pub developer_did: String,
-    pub instructions: Vec<MockWasmInstruction>, // The "compiled" mock bytecode
+    pub instructions: Vec<MockWasmInstruction>,
 }
 
 #[derive(Debug)]
-pub struct DeploymentRequest { // Kept for structure, not actively used by functions
+pub struct DeploymentRequest {
     pub request_id: String,
     pub dapp_name: String,
     pub developer_did: String,
@@ -23,39 +27,38 @@ pub struct DeploymentRequest { // Kept for structure, not actively used by funct
     pub deployment_target_info: String,
 }
 
-// Generates a simple mock Wasm program
 fn generate_mock_dapp_bytecode(dapp_name: &str) -> Vec<MockWasmInstruction> {
     println!("[AstroCLI_Compiler] Generating mock bytecode for DApp: {}", dapp_name);
-    if dapp_name == "my_new_dapp" {
+    if dapp_name == "my_new_dapp" { // Check against the base name
         vec![
             MockWasmInstruction::Log("my_new_dapp: Greet function started.".to_string()),
-            MockWasmInstruction::Push(10), // Arg1 (example)
-            MockWasmInstruction::Push(20), // Arg2 (example)
-            MockWasmInstruction::Add,      // Stack: [30]
-            MockWasmInstruction::Store("result_val".to_string()), // Memory: {"result_val": 30}, Stack: []
+            MockWasmInstruction::Push(10),
+            MockWasmInstruction::Push(20),
+            MockWasmInstruction::Add,
+            MockWasmInstruction::Store("result_val".to_string()),
             MockWasmInstruction::Log("my_new_dapp: Addition complete, result stored.".to_string()),
-            MockWasmInstruction::Push(123), // Return value
+            MockWasmInstruction::Push(123),
             MockWasmInstruction::Return,
         ]
     } else {
         vec![
             MockWasmInstruction::Log(format!("{}: Default mock program started.", dapp_name)),
-            MockWasmInstruction::Push(0), // Default return
+            MockWasmInstruction::Push(0),
             MockWasmInstruction::Return,
         ]
     }
 }
 
-
 pub fn compile_dapp_mock(source_code_path: &str, developer_did: &str) -> Result<MockDappCompilation, String> {
-    let dapp_name = source_code_path.split('/').last().unwrap_or("unknown_dapp").replace(".rs", "");
+    // Extract base name, e.g., "my_new_dapp" from "path/to/my_new_dapp.rs"
+    let base_name = source_code_path.split('/').last().unwrap_or("unknown_dapp");
+    let dapp_name = base_name.strip_suffix(".rs").unwrap_or(base_name).to_string();
+
     println!("[AstroCLI] Compiling DApp '{}' for developer DID '{}' (mock).", dapp_name, developer_did);
     
     let instructions = generate_mock_dapp_bytecode(&dapp_name);
-    // The "bytecode_hash" would ideally be a hash of these instructions or the source.
-    // For mock, let's just hash the dapp_name and a timestamp for uniqueness.
-    let mock_hash_input = format!("{}_{}", dapp_name, uuid::Uuid::new_v4());
-    let mut hasher = sha2::Sha256::new();
+    let mock_hash_input = format!("{}_{}", dapp_name, uuid::Uuid::new_v4()); // uuid should be in scope or a dep
+    let mut hasher = Sha256::new(); // Now Digest::new() is available
     hasher.update(mock_hash_input.as_bytes());
     let mock_hash = hex::encode(hasher.finalize());
 
@@ -83,12 +86,11 @@ pub fn request_dapp_deployment(
     }
     println!("[AstroCLI] Deployment request '{}' for DApp '{}' APPROVED.", request_id, compilation_output.dapp_name);
 
-    // Pass the actual mock instructions to AetherCore
     match aethercore_deploy_module(
-        &compilation_output.dapp_name, // This will be used as module_id_suggestion
+        &compilation_output.dapp_name,
         &compilation_output.mock_wasm_bytecode_hash,
         "version_1.0.0_new_mock_wasm",
-        compilation_output.instructions // Pass the Vec<MockWasmInstruction>
+        compilation_output.instructions
     ) {
         Ok(deployed_module_id) => {
             println!("[AstroCLI] DApp '{}' successfully deployed to AetherCore. Assigned Module ID: {}",
@@ -96,11 +98,9 @@ pub fn request_dapp_deployment(
 
             let mut details = HashMap::new();
             details.insert("developer_did".to_string(), compilation_output.developer_did);
-            details.insert("source_bytecode_hash".to_string(), compilation_output.mock_wasm_bytecode_hash); // Renamed for clarity
+            details.insert("source_bytecode_hash".to_string(), compilation_output.mock_wasm_bytecode_hash);
             details.insert("deployment_target".to_string(), target_info.to_string());
-            details.insert("version".to_string(), "1.0.0_new_mock_wasm".to_string());
-            // We don't store the full bytecode in ISN for this mock, just its hash.
-            // AetherCore holds the "bytecode" (instructions) in its memory.
+            details.insert("version".to_string(), "version_1.0.0_new_mock_wasm".to_string());
 
             match record_module_deployment(&deployed_module_id, &compilation_output.dapp_name, current_block_height, details) {
                 Ok(isn_node) => println!("[AstroCLI] Module deployment for ID '{}' recorded in ISN. Node ID: {}", deployed_module_id, isn_node.id),
