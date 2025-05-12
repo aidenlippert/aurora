@@ -1,6 +1,8 @@
 #![allow(unused_variables, dead_code, unused_imports)]
 //! Cosmic Data Constellation: The core graph database of ISN.
 use std::collections::HashMap;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 // Placeholder for graph node/edge definitions, storage interaction.
 
@@ -19,16 +21,10 @@ pub struct Edge {
     pub relationship: String,
 }
 
-// Mock in-memory store for ISN nodes
-static mut ISN_MOCK_DB: Option<HashMap<String, IsnNode>> = None;
-
-fn init_db() {
-    unsafe {
-        if ISN_MOCK_DB.is_none() {
-            ISN_MOCK_DB = Some(HashMap::new());
-        }
-    }
-}
+// Mock in-memory store for ISN nodes using once_cell::sync::Lazy for safe initialization
+static ISN_MOCK_DB: Lazy<Mutex<HashMap<String, IsnNode>>> = Lazy::new(|| {
+    Mutex::new(HashMap::new())
+});
 
 pub fn record_confirmed_operation(
     operation_type: &str,
@@ -37,13 +33,11 @@ pub fn record_confirmed_operation(
     block_height: u64,
     details: HashMap<String, String>,
 ) -> Result<IsnNode, String> {
-    init_db();
     let node_id = format!("op_record_{}", uuid::Uuid::new_v4());
     let mut properties = details;
     properties.insert("operation_type".to_string(), operation_type.to_string());
     properties.insert("originator_id".to_string(), originator_id.to_string());
     properties.insert("transaction_id".to_string(), transaction_id.to_string());
-
 
     let new_node = IsnNode {
         id: node_id.clone(),
@@ -52,11 +46,9 @@ pub fn record_confirmed_operation(
         created_at_block: block_height,
     };
 
-    unsafe {
-        if let Some(db) = ISN_MOCK_DB.as_mut() {
-            db.insert(node_id.clone(), new_node.clone());
-        }
-    }
+    // Lock the Mutex to safely access the HashMap
+    let mut db_lock = ISN_MOCK_DB.lock().unwrap_or_else(|e| panic!("Failed to lock ISN_MOCK_DB: {:?}", e));
+    db_lock.insert(node_id.clone(), new_node.clone());
 
     println!(
         "[ISN_CDC] Recorded confirmed operation. Node ID: {}, Type: {}, Originator: {}, TxID: {}, Block: {}",
@@ -66,11 +58,10 @@ pub fn record_confirmed_operation(
 }
 
 pub fn get_isn_node(node_id: &str) -> Option<IsnNode> {
-    init_db();
     println!("[ISN_CDC] Attempting to get node {} (mock)", node_id);
-    unsafe {
-        ISN_MOCK_DB.as_ref().and_then(|db| db.get(node_id).cloned())
-    }
+    // Lock the Mutex to safely access the HashMap
+    let db_lock = ISN_MOCK_DB.lock().unwrap_or_else(|e| panic!("Failed to lock ISN_MOCK_DB: {:?}", e));
+    db_lock.get(node_id).cloned()
 }
 
 // Example placeholder function

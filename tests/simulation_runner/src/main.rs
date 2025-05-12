@@ -1,13 +1,18 @@
-use nebula_pulse_swarm::OperationPayload;
-use aethercore_runtime::{ExecutionRequest, ExecutionResult};
-use ecliptic_concordance::{Transaction as ConsensusTransaction, Block}; // Renamed to avoid clash if needed
+// We don't need to explicitly import these if they are only used for type annotations
+// on function results that are immediately destructured or their types inferred.
+// However, for clarity, we can keep the ones that define structs we pattern match or create.
+use aethercore_runtime::ExecutionRequest;
+// ConsensusTransaction and Block are used for type annotation of variables
+use ecliptic_concordance::{Transaction as ConsensusTransaction, Block};
+// IsnNode is used for type annotation
 use cosmic_data_constellation::IsnNode;
+
 use std::collections::HashMap;
 use sha2::{Sha256, Digest};
 use hex;
 
 // Helper to create a mock hash of a struct (very basic)
-fn mock_hash_struct<T: std::fmt::Debug>(data: &T) -> String {
+fn mock_hash_struct<T: std.fmt::Debug>(data: &T) -> String {
     let mut hasher = Sha256::new();
     hasher.update(format!("{:?}", data).as_bytes());
     let result = hasher.finalize();
@@ -21,6 +26,7 @@ fn main() {
     // 1. User initiates an operation via NebulaPulse Swarm
     let originator = "user_punk_123";
     let operation_data = b"{\"recipient\":\"user_cosmic_456\", \"amount\":100, \"asset\":\"AUC\"}".to_vec();
+    // nebula_pulse_swarm::OperationPayload type is inferred here
     let initiated_op = match nebula_pulse_swarm::initiate_operation(originator, "payment_v1", operation_data) {
         Ok(op) => op,
         Err(e) => {
@@ -30,7 +36,6 @@ fn main() {
     };
     println!("  -> NebulaPulse: Operation initiated: Type '{}', Originator '{}'", initiated_op.operation_type, initiated_op.originator_id);
 
-    // (Conceptually, NebulaPulse sends this to Graviton Edge, which then routes to AetherCore)
     let _edge_processing_id = match nebula_pulse_swarm::send_data_to_edge(&initiated_op) {
         Ok(id) => id,
         Err(e) => {
@@ -39,13 +44,13 @@ fn main() {
         }
     };
 
-
     // 2. AetherCore Runtime executes the "smart contract" for the operation
     let exec_request = ExecutionRequest {
         module_id: "mock_contract_v1".to_string(),
         function_name: "process_payment".to_string(),
-        arguments: initiated_op.data.clone(), // Pass original data as arguments
+        arguments: initiated_op.data.clone(),
     };
+    // aethercore_runtime::ExecutionResult type is inferred here
     let execution_result = match aethercore_runtime::execute_module(exec_request) {
         Ok(res) => res,
         Err(e) => {
@@ -67,13 +72,11 @@ fn main() {
         return;
     }
 
-    // Hash the execution result (or a summary) to submit for consensus
-    let exec_result_summary = format!("{:?}", execution_result); // Simple debug representation
+    let exec_result_summary = format!("{:?}", execution_result);
     let exec_result_hash = mock_hash_struct(&exec_result_summary);
 
-
     // 3. Ecliptic Concordance achieves consensus on the operation's result
-    let consensus_tx = match ecliptic_concordance::submit_for_consensus(exec_result_hash.clone()) {
+    let consensus_tx: ConsensusTransaction = match ecliptic_concordance::submit_for_consensus(exec_result_hash.clone()) {
         Ok(tx) => tx,
         Err(e) => {
             eprintln!("Error submitting for consensus: {}", e);
@@ -82,8 +85,7 @@ fn main() {
     };
     println!("  -> EclipticConcordance: Submitted for consensus. TxID: '{}', PayloadHash: '{}'", consensus_tx.id, consensus_tx.payload_hash);
 
-    // Simulate forming a block with this transaction
-    let finalized_block = match ecliptic_concordance::form_and_finalize_block(vec![consensus_tx.clone()]) {
+    let finalized_block: Block = match ecliptic_concordance::form_and_finalize_block(vec![consensus_tx.clone()]) {
         Ok(block) => block,
         Err(e) => {
             eprintln!("Error forming/finalizing block: {}", e);
@@ -92,7 +94,6 @@ fn main() {
     };
     println!("  -> EclipticConcordance: Block finalized. ID: '{}', Height: {}", finalized_block.id, finalized_block.height);
 
-
     // 4. Cosmic Data Constellation (ISN) records the confirmed operation
     let mut op_details = HashMap::new();
     op_details.insert("module_executed".to_string(), "mock_contract_v1".to_string());
@@ -100,8 +101,7 @@ fn main() {
     op_details.insert("execution_output_hash".to_string(), exec_result_hash);
     op_details.insert("raw_input_data".to_string(), String::from_utf8_lossy(&initiated_op.data).to_string());
 
-
-    let isn_record = match cosmic_data_constellation::record_confirmed_operation(
+    let isn_record: IsnNode = match cosmic_data_constellation::record_confirmed_operation(
         &initiated_op.operation_type,
         &initiated_op.originator_id,
         &consensus_tx.id,
@@ -116,13 +116,11 @@ fn main() {
     };
     println!("  -> ISN_CDC: Operation recorded. Node ID: '{}', Type: '{}'", isn_record.id, isn_record.r#type);
 
-    // Optionally, try to retrieve the node
     if let Some(retrieved_node) = cosmic_data_constellation::get_isn_node(&isn_record.id) {
         println!("  -> ISN_CDC: Successfully retrieved node: {:?}", retrieved_node);
     } else {
         println!("  -> ISN_CDC: Failed to retrieve node '{}'", isn_record.id);
     }
-
 
     println!("\n=== Simulation Complete ===");
 }
