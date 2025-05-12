@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! ChronoForge: Predictive Multiverse Simulator.
 
 // Runs simulations: ExaCore Parallelism, Scenario Matrices, VerityProof Audits.
 
-pub fn run_simulation(model_id: &str, parameters: &[u8]) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }\npub fn audit_simulation_verity(simulation_id: &str) -> Result<bool, String> { Err("Not implemented".to_string()) }
+pub fn run_simulation(model_id: &str, parameters: &[u8]) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }
+pub fn audit_simulation_verity(simulation_id: &str) -> Result<bool, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {
