@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! Cosmic Justice Enforcers: Integrity Assurance Protocols.
 
 // Handles VoidSlash Mechanisms and VerityProof Challenges.
 
-pub fn apply_void_slash(validator_id: &str, reason: &str) -> Result<(), String> { Err("Not implemented".to_string()) }\npub fn resolve_verity_proof_challenge(challenge_id: &str, evidence: &[u8]) -> Result<bool, String> { Err("Not implemented".to_string()) }
+pub fn apply_void_slash(validator_id: &str, reason: &str) -> Result<(), String> { Err("Not implemented".to_string()) }
+pub fn resolve_verity_proof_challenge(challenge_id: &str, evidence: &[u8]) -> Result<bool, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {

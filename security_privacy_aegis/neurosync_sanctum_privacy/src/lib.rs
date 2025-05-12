@@ -1,9 +1,9 @@
-#![allow(unused_variables, dead_code, unused_imports)] // Silence warnings for placeholders
 //! NeuroSync Sanctum: Neural Privacy Bastion.
 
 // Provides OmniCrypt E2EE, ZeroMind Consent (specific to neural data), Differential Neural Flux.
 
-pub fn omnicrypt_encrypt_neural(data: &[u8]) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }\npub fn apply_differential_privacy_neural(data_batch: &[Vec<u8>], epsilon: f64) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }
+pub fn omnicrypt_encrypt_neural(data: &[u8]) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }
+pub fn apply_differential_privacy_neural(data_batch: &[Vec<u8>], epsilon: f64) -> Result<Vec<u8>, String> { Err("Not implemented".to_string()) }
 
 // Example placeholder function
 pub fn status() -> &'static str {
