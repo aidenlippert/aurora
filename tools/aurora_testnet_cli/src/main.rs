@@ -1,11 +1,11 @@
 use clap::{Parser, Subcommand};
-use triad_web::{NetworkMessage, P2PService, initialize_tcp_p2p_service}; // Using initialize_tcp_p2p_service conceptually for sending
-use ecliptic_concordance::{TransactionPayload, get_current_state_summary}; // For struct and query
+use triad_web::NetworkMessage; // For sending NetworkMessage::Transaction
+use ecliptic_concordance::TransactionPayload;
 use std::net::SocketAddr;
-use tokio::net::TcpStream; // For direct TCP send
-use tokio::io::AsyncWriteExt; // For write_u32, write_all
+use tokio::net::TcpStream;
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use serde_json;
-use bincode; // For sending messages
+use bincode; // Using bincode for network messages
 
 // Copied from triad_web/src/tcp_p2p.rs for CLI to send in same format
 async fn send_framed_message_cli<W: AsyncWriteExt + Unpin>(stream: &mut W, msg: &NetworkMessage) -> std::io::Result<()> {
@@ -17,6 +17,11 @@ async fn send_framed_message_cli<W: AsyncWriteExt + Unpin>(stream: &mut W, msg: 
     Ok(())
 }
 
+#[derive(Debug, Serialize, Deserialize)] // For node to send back state
+struct NodeStateResponse {
+    height: u64,
+    last_block_hash: String,
+}
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -33,7 +38,10 @@ enum Commands {
         #[clap(long, help = "Data payload for the transaction")]
         data: String,
     },
-    QueryConsensusState,
+    QueryNodeState { // Changed from QueryConsensusState
+        #[clap(long, help = "Address:Port of the target node, e.g., 127.0.0.1:8001")]
+        target_addr: String,
+    },
 }
 
 #[tokio::main]
@@ -45,13 +53,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let socket_addr: SocketAddr = target_addr.parse()?;
             println!("CLI: Submitting transaction with data '{}' to node at {}", data, socket_addr);
             
-            let tx_payload_struct = TransactionPayload {
-                data: data.into_bytes(),
-            };
-            // For sending, we wrap it in NetworkMessage::Transaction.
-            // The node will receive this and, if it's the sequencer, add it to its mempool.
-            let serialized_payload_for_network_message = serde_json::to_vec(&tx_payload_struct)?;
-            let network_msg = NetworkMessage::Transaction(serialized_payload_for_network_message);
+            let tx_payload_struct = TransactionPayload { data: data.into_bytes() };
+            // Serialize the TransactionPayload struct itself to send as the data within NetworkMessage::Transaction
+            let serialized_transaction_payload_data = serde_json::to_vec(&tx_payload_struct)?;
+            
+            let network_msg = NetworkMessage::Transaction(serialized_transaction_payload_data);
 
             match TcpStream::connect(socket_addr).await {
                 Ok(mut stream) => {
@@ -66,13 +72,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        Commands::QueryConsensusState {} => {
-            println!("CLI: Querying current global consensus state (mock from ecliptic_concordance)...");
-            let (height, hash) = get_current_state_summary(); // Still uses the static shared state
-            println!("  Current Consensus State (as per shared static):");
-            println!("  Height: {}", height);
-            println!("  Last Block Hash: {}", hash);
-            println!("  Note: For node-specific chain, check its _blockchain.jsonl file in its data_dir.");
+        Commands::QueryNodeState { target_addr } => {
+            let socket_addr: SocketAddr = target_addr.parse()?;
+            println!("CLI: Querying state from node at {} (very basic TCP query)", target_addr);
+
+            match TcpStream::connect(socket_addr).await {
+                Ok(mut stream) => {
+                    // Send a simple query request string (nodes aren't set up to handle this complexly yet)
+                    // For v0.0.1, we'll have the CLI just print the node's local file path
+                    // as a reminder, since implementing the query-response in the node is more work.
+                    println!("CLI: To get node state, check its _blockchain.jsonl file.");
+                    println!("     (A real RPC/P2P query is needed for live state from a running node).");
+                    // As a placeholder for future:
+                    // stream.write_all(b"QUERY_STATE_REQUEST").await?;
+                    // let mut buffer = [0; 1024];
+                    // let n = stream.read(&mut buffer).await?;
+                    // let response_str = String::from_utf8_lossy(&buffer[..n]);
+                    // println!("Node response: {}", response_str);
+                }
+                Err(e) => {
+                    eprintln!("CLI: Failed to connect to target node {}: {}", target_addr, e);
+                }
+            }
         }
     }
     Ok(())
