@@ -10,10 +10,9 @@ tokio = { version = "1", features = ["full"] }
 async-trait = "0.1.77"
 bytes = "1.5.0" 
 bincode = "1.3.3" 
-futures = "0.3"
-uuid = { version = "1.8.0", features = ["v4"] } # Added for message IDs if needed
-# once_cell not needed at this level if tcp_p2p manages its own state
+futures = "0.3" # For stream utilities, might not be strictly needed for this simple version
+uuid = { version = "1.8.0", features = ["v4"] } # For message IDs
 
-# Optional: For logging within triad_web itself
+# For logging within triad_web itself if desired
 # log = "0.4"
 # env_logger = "0.10"
