@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+serde_json = "1.0"
 semantic_synapse_interfaces = { path = "../../knowledge_nexus_isn/semantic_synapse_interfaces" }
 chronoforge_simulator = { path = "../../omniverse_reality_simulation/chronoforge_simulator" }
 eonmirror_interface = { path = "../../omniverse_reality_simulation/eonmirror_interface" }
