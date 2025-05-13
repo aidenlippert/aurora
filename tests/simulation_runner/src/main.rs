@@ -1,5 +1,5 @@
 use aethercore_runtime::ExecutionRequest;
-use ecliptic_concordance::{ConcordanceTransaction, Block, submit_transaction_payload, sequencer_create_block, validate_and_apply_block}; // Removed TransactionPayload
+use ecliptic_concordance::{ConcordanceTransaction, Block, submit_transaction_payload, sequencer_create_block, validate_and_apply_block};
 use novavault_flux_finance::{FinancialOperationType as NovaVaultOpType, FinancialOperation};
 use celestial_synapse_network_csn as csn;
 use starsenate_collectives_governance::{ProposalStatus, submit_proposal, cast_vote_on_proposal, tally_votes_and_decide};
@@ -16,22 +16,24 @@ use eonmirror_interface::{ingest_real_world_data, RealWorldDataPoint};
 use chronoforge_simulator::generate_prediction_from_isn_data;
 use gaiapulse_engine::react_to_environmental_prediction;
 use semantic_synapse_interfaces;
-use serde_json; // For serializing payload in financial sim phase
+use serde_json;
 
 use wasmi::Value;
 use std::collections::HashMap;
 use sha2::{Sha256, Digest};
 use hex;
 
-fn mock_hash_data<T: std::fmt::Debug>(data: &T) -> String { /* ... */
+fn mock_hash_data<T: std::fmt::Debug>(data: &T) -> String {
     let mut hasher = Sha256::new(); hasher.update(format!("{:?}", data).as_bytes()); hex::encode(hasher.finalize())
 }
-fn get_next_mock_block_height() -> u64 { /* ... */
-    static mut MOCK_HEIGHT_COUNTER: u64 = 0; unsafe { MOCK_HEIGHT_COUNTER += 1; MOCK_HEIGHT_COUNTER }
+fn get_next_mock_block_height() -> u64 {
+    // This function now aims to get the *next expected* block height for new phases
+    // by querying the current consensus state.
+    ecliptic_concordance::get_current_state_summary().0 + 1
 }
 
-fn run_financial_simulation_phase(user_did: &str, block_height: u64) {
-    println!("\n--- Running Financial Simulation Phase for {} ---", user_did);
+fn run_financial_simulation_phase(user_did: &str, current_block_height_for_isn_records: u64) { // Renamed block_height param
+    println!("\n--- Running Financial Simulation Phase for {} (Targeting Block around {}) ---", user_did, current_block_height_for_isn_records);
     let mut public_payload_details: HashMap<String, String> = HashMap::new();
     public_payload_details.insert("to_address_public_key_hash".to_string(), "hash_of_cosmic_789_pk".to_string());
     public_payload_details.insert("amount_display".to_string(), "CONFIDENTIAL".to_string());
@@ -47,27 +49,26 @@ fn run_financial_simulation_phase(user_did: &str, block_height: u64) {
     let mut full_public_payload_for_novavault = public_payload_details.clone();
     full_public_payload_for_novavault.insert("fee_paid".to_string(), csn_suggested_fee.to_string());
 
+    // NovaVault processing includes ISN recording, which needs a block height.
+    // Use the passed current_block_height_for_isn_records which represents the block this op will be IN.
     let financial_op_result: FinancialOperation = novavault_flux_finance::process_financial_operation(
         user_did, NovaVaultOpType::PrivateTransferAUC, full_public_payload_for_novavault, 
-        private_inputs_data.clone(), block_height
+        private_inputs_data.clone(), current_block_height_for_isn_records
     ).expect("NV process failed");
     if let Some(ref _proof) = financial_op_result.zk_proof { stl::update_trust_score(user_did, stl::FINANCIAL_CONTEXT, 0.05, "Generated ZKP"); }
 
     // --- Consensus Part for the Financial Operation ---
-    // Serialize the *payload* of the financial operation for consensus (or a hash of it)
     let consensus_payload_data = serde_json::to_vec(&financial_op_result.payload).expect("Failed to serialize fin_op payload for consensus");
-    
-    let submitted_tx_id = submit_transaction_payload(consensus_payload_data) // This now takes Vec<u8>
+    let submitted_tx_id = submit_transaction_payload(consensus_payload_data)
         .expect("Failed to submit payload to consensus mempool");
-    println!("  -> EclipticConcordance: Payload for financial op submitted, TxID: {}", submitted_tx_id);
+    println!("  -> EclipticConcordance: Payload for financial op submitted to mempool, TxID: {}", submitted_tx_id);
 
     let sequencer_node_id = "sim_runner_sequencer";
     let new_block = sequencer_create_block(sequencer_node_id)
         .expect("Sequencer failed to create block");
-    println!("  -> EclipticConcordance: Sequencer created Block Height: {}", new_block.height);
-
-    validate_and_apply_block(&new_block).expect("Block validation failed by self");
-    println!("  -> EclipticConcordance: Block finalized and applied. ID: '{}', Height: {}", new_block.id, new_block.height);
+    // The sequencer_create_block ALREADY updates the shared CONSENSUS_STATE.
+    // No need to call validate_and_apply_block on the same state from the same orchestrator.
+    println!("  -> EclipticConcordance: Sequencer created and applied Block Height: {}. ID: '{}'", new_block.height, new_block.id);
     // --- End Consensus Part ---
 
     let exec_req = ExecutionRequest { module_id: "private_auc_handler_v1".to_string(), function_name: "log_private_op_intent".to_string(), arguments: Vec::new(), gas_limit: 500 };
@@ -83,7 +84,7 @@ fn run_financial_simulation_phase(user_did: &str, block_height: u64) {
     if let Ok(bal) = novavault_flux_finance::get_account_balance(user_did, "AUC_PRIVATE") { println!("  -> NovaVault: Balance for {} (AUC_PRIVATE): {} (mock ISN)", user_did, bal); }
 }
 fn run_governance_simulation_phase(proposer_did_str: &str, voter_dids: Vec<&str>, block_height: u64) { /* Omitted - same */
-    println!("\n--- Running Governance Simulation Phase ---");
+    println!("\n--- Running Governance Simulation Phase (Targeting Block around {}) ---", block_height);
     let target_module_id = "mock_contract_v1".to_string();
     let new_code_hash = mock_hash_data(&"new_wasm_code_for_v1_1_0_empty_bytecode_upgrade");
     let proposal: starsenate_collectives_governance::Proposal = submit_proposal(proposer_did_str, "Upgrade mock_contract_v1 to v1.1.0", "Critical fix for mock contract.", Some(target_module_id.clone()), &new_code_hash).expect("Proposal submission failed");
@@ -106,7 +107,7 @@ fn run_governance_simulation_phase(proposer_did_str: &str, voter_dids: Vec<&str>
     }
 }
 fn run_von_simulation_phase(obligor_did_str: &str, obligee_did_str: &str, block_height: u64) { /* Omitted - same */
-    println!("\n--- Running Verifiable Obligation Nexus (VON) Simulation Phase ---");
+    println!("\n--- Running Verifiable Obligation Nexus (VON) Simulation Phase (Targeting Block around {}) ---", block_height);
     let due_timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 86400;
     let obligation = von::create_fluxpact_contract(obligor_did_str, obligee_did_str, "Deliver resources", 50, due_timestamp, block_height).expect("Obligation creation failed");
     println!("  -> VON: Created Obligation ID: '{}'", obligation.id);
@@ -122,7 +123,7 @@ fn run_von_simulation_phase(obligor_did_str: &str, obligee_did_str: &str, block_
     }
 }
 fn run_ecological_simulation_phase(green_validator_did: &str, block_height: u64) { /* Omitted - same */
-    println!("\n--- Running Ecological Simulation Phase for DID {} ---", green_validator_did);
+    println!("\n--- Running Ecological Simulation Phase for DID {} (Targeting Block around {}) ---", green_validator_did, block_height);
     let operation_description = format!("Validated block #{} with green energy", block_height);
     match process_green_operation_attestation(green_validator_did, &operation_description, 5, block_height) {
         Ok(credit) => {
@@ -135,7 +136,7 @@ fn run_ecological_simulation_phase(green_validator_did: &str, block_height: u64)
     if let Ok(Some(boost)) = calculate_and_distribute_fluxboost_reward(green_validator_did, 100, &op_id_for_reward, block_height) { println!("  -> EcoNova: FluxBoost of {} distributed.", boost); }
 }
 fn run_developer_deployment_phase(developer_did: &str, block_height: u64, wasm_module_crate_name: &str) -> Option<String> { /* Omitted - same */
-    println!("\n--- Running Developer Deployment Simulation Phase for DID {} (Wasm Crate: {}) ---", developer_did, wasm_module_crate_name);
+    println!("\n--- Running Developer Deployment Simulation Phase for DID {} (Wasm Crate: {}, Targeting Block {}) ---", developer_did, wasm_module_crate_name, block_height);
     let wasm_base_path_for_loading = "";
     let compilation_output: MockDappCompilation = match compile_dapp_mock(wasm_module_crate_name, developer_did, wasm_base_path_for_loading) {
         Ok(comp) => comp, Err(e) => { eprintln!("[DevSim] DApp Wasm loading/compilation failed for '{}': {}", wasm_module_crate_name, e); return None; }
@@ -165,7 +166,7 @@ fn run_developer_deployment_phase(developer_did: &str, block_height: u64, wasm_m
 }
 fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str, normal_dapp_module_id: &str, _block_height: u64) {
     let current_block_height = get_next_mock_block_height();
-    println!("\n--- Running Risk Mitigation & Ethical Oversight Simulation Phase ---");
+    println!("\n--- Running Risk Mitigation & Ethical Oversight Simulation Phase (Targeting Block around {}) ---", current_block_height);
     println!("\n  Scenario 1: Developer '{}' attempts to deploy 'malicious_dapp_attempt' (name triggers ethical check)...", malicious_dev_did);
     run_developer_deployment_phase(malicious_dev_did, current_block_height, "malicious_dapp_attempt");
     println!("\n  Scenario 2: Developer '{}' attempts to deploy 'risky_dapp_code' (name triggers NCI scan)...", risky_dev_did);
@@ -183,7 +184,7 @@ fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str
     } else { println!("  -> NebulaShield: No anomaly detected for module '{}'.", normal_dapp_module_id); }
 }
 fn run_reality_sync_prediction_phase(sensor_operator_did: &str, block_height: u64) { /* Omitted - same */
-    println!("\n--- Running Reality Sync & Prediction Simulation Phase ---");
+    println!("\n--- Running Reality Sync & Prediction Simulation Phase (Targeting Block around {}) ---", block_height);
     let mut sensor_metadata = HashMap::new();
     sensor_metadata.insert("unit".to_string(), "ppm".to_string());
     let data_point1 = RealWorldDataPoint {
@@ -206,7 +207,7 @@ fn run_reality_sync_prediction_phase(sensor_operator_did: &str, block_height: u6
         Err(e) => eprintln!("[RealitySync] Error generating prediction: {}", e),
     }
 }
-fn run_isn_graph_query_phase(developer_did: &str, _block_height: u64) {
+fn run_isn_graph_query_phase(developer_did: &str, _block_height: u64) { /* Omitted - same */
     println!("\n--- Running ISN Graph Query Simulation Phase for Developer {} ---", developer_did);
     let query_str = format!("GET_DEPLOYED_MODULES_BY_DEV_DID {}", developer_did);
     println!("  -> ISN Query: {}", query_str);
@@ -219,7 +220,7 @@ fn run_isn_graph_query_phase(developer_did: &str, _block_height: u64) {
 fn main() {
     println!("=== Aurora Full Lifecycle Simulation (All Phases including Gas & Graph Query) ===");
     println!("\n--- Running Identity Creation & STL Initialization Phase ---");
-    let block_height_init = get_next_mock_block_height();
+    let block_height_init = get_next_mock_block_height(); // Should be 1
     let user_punk_did = create_celestial_id("user_punk_789", "pk_punk", block_height_init).unwrap().did;
     let dev_aurora_did = create_celestial_id("developer_aurora_core_001", "pk_dev_core", block_height_init).unwrap().did;
     let voter_alpha_did = create_celestial_id("voter_alpha_stl_green", "pk_voter_a", block_height_init).unwrap().did;
@@ -233,7 +234,7 @@ fn main() {
     let mut all_dids_for_stl_strings = vec![user_punk_did.clone(), dev_aurora_did.clone(), voter_alpha_did.clone(), other_voters_temp[0].clone(), other_voters_temp[1].clone(), obligee_did_str.clone(), dapp_developer_did.clone(), malicious_dev_did.clone(), risky_dev_did.clone()];
     all_dids_for_stl_strings.iter().for_each(|did_str| stl::initialize_entity_trust(did_str));
 
-    run_financial_simulation_phase(&user_punk_did, get_next_mock_block_height());
+    run_financial_simulation_phase(&user_punk_did, get_next_mock_block_height()); // Expects next block, e.g. 2
     run_governance_simulation_phase(&dev_aurora_did, other_voters.clone(), get_next_mock_block_height());
     run_von_simulation_phase(&user_punk_did, &obligee_did_str, get_next_mock_block_height());
     run_ecological_simulation_phase(&voter_alpha_did, get_next_mock_block_height());
