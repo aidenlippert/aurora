@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
-use uuid;
+use uuid; // Ensure uuid is imported if Uuid::new_v4() is used
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,11 +28,11 @@ static ISN_MOCK_DB_NODES: Lazy<Mutex<HashMap<String, IsnNode>>> = Lazy::new(|| M
 static ISN_MOCK_DB_EDGES: Lazy<Mutex<Vec<IsnEdge>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 fn find_node_id_by_did_property(did_string_to_find: &str, nodes_db: &HashMap<String, IsnNode>) -> Option<String> {
-    println!("[ISN_CDC_Debug] find_node_id: Searching for DID property: '{}'", did_string_to_find);
+    println!("[ISN_CDC_Debug] find_node_id_by_did_property: Searching for DID property: '{}' in {} nodes", did_string_to_find, nodes_db.len());
     for (node_id_key, node_value) in nodes_db.iter() {
         if node_value.r#type == "CelestialIdentity" {
             if let Some(prop_did) = node_value.properties.get("did") {
-                // println!("[ISN_CDC_Debug]   Node ID: {}, Prop DID: '{}'", node_id_key, prop_did);
+                // println!("[ISN_CDC_Debug]   Checking Node ID: {}, Prop DID: '{}'", node_id_key, prop_did);
                 if prop_did == did_string_to_find {
                     println!("[ISN_CDC_Debug]   MATCH FOUND for DID '{}'! Node ID: {}", did_string_to_find, node_id_key);
                     return Some(node_id_key.clone());
@@ -48,7 +48,7 @@ fn create_and_store_isn_node(
     base_id_prefix: &str, node_type: &str, block_height: u64,
     mut properties: HashMap<String, String>, main_subject_key: &str, main_subject_value: &str,
 ) -> Result<IsnNode, String> {
-    let node_id = format!("{}_{}", base_id_prefix, uuid::Uuid::new_v4());
+    let node_id = format!("{}_{}", base_id_prefix, uuid::Uuid::new_v4().as_simple().to_string());
     properties.insert(main_subject_key.to_string(), main_subject_value.to_string());
     let new_node = IsnNode { id: node_id.clone(), r#type: node_type.to_string(), properties, created_at_block: block_height };
     ISN_MOCK_DB_NODES.lock().unwrap().insert(node_id.clone(), new_node.clone());
@@ -77,17 +77,24 @@ pub fn create_isn_edge(
     properties: HashMap<String, String>, current_block_height: u64,
 ) -> Result<IsnEdge, String> {
     let nodes_db_guard = ISN_MOCK_DB_NODES.lock().unwrap();
-    let actual_from_node_id = if nodes_db_guard.contains_key(from_identifier) { from_identifier.to_string() }
-                            else if let Some(id) = find_node_id_by_did_property(from_identifier, &nodes_db_guard) { id }
-                            else { return Err(format!("Source entity/node '{}' for edge not found in ISN DB.", from_identifier)); };
+    let actual_from_node_id = if nodes_db_guard.contains_key(from_identifier) {
+        from_identifier.to_string()
+    } else if let Some(id) = find_node_id_by_did_property(from_identifier, &nodes_db_guard) {
+        id
+    } else {
+        return Err(format!("[ISN_EdgeCreate_Error] Source entity/node identifier '{}' for edge not found in ISN DB by key or DID property.", from_identifier));
+    };
     
-    // For 'to_identifier', it's likely a module_deploy_... ID which IS a primary key
-    let actual_to_node_id = if nodes_db_guard.contains_key(to_identifier) { to_identifier.to_string() }
-                          else if let Some(id) = find_node_id_by_did_property(to_identifier, &nodes_db_guard) { id } // Less likely for 'to' in this context
-                          else { return Err(format!("Target node ID '{}' for edge not found in ISN DB.", to_identifier)); };
+    let actual_to_node_id = if nodes_db_guard.contains_key(to_identifier) {
+        to_identifier.to_string()
+    } else if let Some(id) = find_node_id_by_did_property(to_identifier, &nodes_db_guard) { // Less likely for 'to' if it's a newly created record_... node ID
+        id
+    } else {
+         return Err(format!("[ISN_EdgeCreate_Error] Target node ID '{}' for edge not found in ISN DB (not a key or resolvable DID).", to_identifier));
+    };
     drop(nodes_db_guard);
 
-    let edge_id = format!("edge_{}", uuid::Uuid::new_v4());
+    let edge_id = format!("edge_{}", uuid::Uuid::new_v4().as_simple().to_string());
     let new_edge = IsnEdge { id: edge_id.clone(), from_node_id: actual_from_node_id.clone(), to_node_id: actual_to_node_id.clone(), relationship_type: relationship_type.to_string(), properties, created_at_block: current_block_height };
     ISN_MOCK_DB_EDGES.lock().unwrap().push(new_edge.clone());
     println!("[ISN_CDC] Created Edge ID: '{}'. From Node ID: '{}', To Node ID: '{}', Type: '{}'", new_edge.id, new_edge.from_node_id, new_edge.to_node_id, new_edge.relationship_type);
@@ -95,27 +102,31 @@ pub fn create_isn_edge(
 }
 
 pub fn get_isn_node(node_id: &str) -> Option<IsnNode> {
-    // println!("[ISN_CDC] Attempting to get node {} (mock)", node_id); // Can be noisy
+    // println!("[ISN_CDC] Attempting to get node {} (mock)", node_id);
     ISN_MOCK_DB_NODES.lock().unwrap().get(node_id).cloned()
 }
 
 pub fn get_edges_from_node(node_id_or_did_to_query: &str, relationship_filter: Option<&str>) -> Vec<IsnEdge> {
-    let resolved_node_id;
+    let resolved_node_id_for_query;
     {
         let nodes_db_guard = ISN_MOCK_DB_NODES.lock().unwrap();
+        println!("[ISN_CDC_Debug] get_edges_from_node: Attempting to resolve input: '{}'", node_id_or_did_to_query); // Print input to this func
         if nodes_db_guard.contains_key(node_id_or_did_to_query) {
-            resolved_node_id = node_id_or_did_to_query.to_string();
+            resolved_node_id_for_query = node_id_or_did_to_query.to_string();
+            println!("[ISN_CDC_Debug]   Resolved as direct key: '{}'", resolved_node_id_for_query);
         } else if let Some(found_id) = find_node_id_by_did_property(node_id_or_did_to_query, &nodes_db_guard) {
-            resolved_node_id = found_id;
+            resolved_node_id_for_query = found_id;
+            println!("[ISN_CDC_Debug]   Resolved via DID property to Node ID: '{}'", resolved_node_id_for_query);
         } else {
-            println!("[ISN_CDC_Debug] get_edges_from_node: Could not resolve identifier '{}' to an ISN Node ID for edge query.", node_id_or_did_to_query);
+            println!("[ISN_CDC_Debug] get_edges_from_node: Could not resolve identifier '{}' to an ISN Node ID. Returning empty edge list.", node_id_or_did_to_query);
             return Vec::new();
         }
-    }
-    println!("[ISN_CDC_Debug] get_edges_from_node: Querying edges for resolved Node ID '{}' with filter {:?}.", resolved_node_id, relationship_filter);
+    } // nodes_db_guard dropped here
+
+    println!("[ISN_CDC_Debug] get_edges_from_node: Querying edges FROM resolved Node ID '{}' with filter {:?}.", resolved_node_id_for_query, relationship_filter);
     let edges_db = ISN_MOCK_DB_EDGES.lock().unwrap();
     edges_db.iter()
-        .filter(|edge| edge.from_node_id == resolved_node_id ) // Only outgoing for "deployed_module"
+        .filter(|edge| edge.from_node_id == resolved_node_id_for_query) // Only outgoing edges from the resolved ID
         .filter(|edge| {
             relationship_filter.map_or(true, |filter| edge.relationship_type == filter)
         })
