@@ -4,9 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-triad_web = { path = "../../sgs_foundations/triad_web" } # For InMemoryP2PNetwork and NetworkMessage
-ecliptic_concordance = { path = "../../sgs_foundations/ecliptic_concordance" } # For TransactionPayload and get_current_state_summary
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 clap = { version = "4.0", features = ["derive", "cargo"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] } # Ensure "net"
+uuid = { version = "1.8.0", features = ["v4"] } # For generating request IDs

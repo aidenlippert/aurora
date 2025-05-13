@@ -5,14 +5,4 @@ edition = "2021"
 
 [lib]
 crate-type = ["cdylib"]
-
-[dependencies]
-# No special dependencies needed for this simple example
-
-# Profile settings specific to this crate when built in release mode
-[profile.release]
-panic = "abort"   # Wasm modules must abort on panic for no_std
-opt-level = "z"   # Optimize for smallest size
-lto = true
-strip = true
-codegen-units = 1
+test = false

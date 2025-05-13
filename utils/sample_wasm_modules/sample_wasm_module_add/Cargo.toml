@@ -4,13 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-
-# Ensure release builds (used for wasm32-unknown-unknown target) abort on panic
-[profile.release]
-panic = "abort"
-opt-level = "z" # Optimize for size
-lto = true
-strip = true 
+crate-type = ["cdylib"] # Critical for Wasm library output
+test = false

@@ -95,12 +95,22 @@ members = [
     "utils/sample_wasm_modules/sample_wasm_host_interaction"
 ]
 
-# Default build profile for release - primarily affects native binaries run with `cargo run --release`
-# or built with `cargo build --release` without a specific target.
+# Default development profile
+[profile.dev]
+panic = "abort" 
+# opt-level = 0 (default)
+# debug = true (default)
+
+# Default build profile for release - primarily affects native binaries
 [profile.release]
 lto = true
 codegen-units = 1
-# IMPORTANT: No `panic` setting here. This allows individual crates (like Wasm libs)
-# to define their own panic strategy for their release profile.
-strip = true # Good for native binaries too
-opt-level = "s" # Optimize for size; "z" is more aggressive but can be slower.
+strip = true
+opt-level = "s" # Optimize for size for native binaries
+
+# Profile specifically for wasm32-unknown-unknown target release builds
+[profile.release-wasm]
+inherits = "release" 
+opt-level = "z" # More aggressive size optimization for Wasm
+panic = "abort" # Crucial for no_std Wasm
+# lto, codegen-units, strip are inherited from 'release' and generally good for Wasm too.

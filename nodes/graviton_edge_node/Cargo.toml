@@ -6,10 +6,15 @@ edition = "2021"
 [dependencies]
 # Aurora workspace crates
 ecliptic_concordance = { path = "../../sgs_foundations/ecliptic_concordance" }
-triad_web = { path = "../../sgs_foundations/triad_web" } # For InMemoryP2PNetwork
+triad_web = { path = "../../sgs_foundations/triad_web" } # Now uses libp2p
+
 # Utility crates
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0" # For serializing/deserializing messages
-tokio = { version = "1", features = ["full"] } # For async runtime, timers
+serde_json = "1.0" 
+tokio = { version = "1", features = ["full"] } 
 uuid = { version = "1.8.0", features = ["v4"] }
-clap = { version = "4.0", features = ["derive"] } # For command line argument parsing
+clap = { version = "4.0", features = ["derive"] }
+bincode = "1.3.3" # For serializing/deserializing network messages if not already
+log = "0.4"
+env_logger = "0.10"
+libp2p = { version = "0.53.2" } # For Multiaddr, PeerId types
