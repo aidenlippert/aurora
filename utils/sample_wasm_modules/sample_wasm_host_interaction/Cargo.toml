@@ -7,8 +7,10 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-# No special dependencies needed for this simple example
 
-# Add panic = "abort" for release builds to satisfy no_std Wasm requirements
+# Ensure release builds (used for wasm32-unknown-unknown target) abort on panic
 [profile.release]
 panic = "abort"
+opt-level = "z" # Optimize for size
+lto = true
+strip = true

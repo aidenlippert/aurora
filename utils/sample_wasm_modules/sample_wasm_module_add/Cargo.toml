@@ -4,10 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"] # Critical for Wasm library output
+crate-type = ["cdylib"]
 
 [dependencies]
-# wasm-bindgen is good for defining clear interfaces, but for a raw wasmi call, not strictly needed.
-# For simplicity with wasmi and direct function calls, we might not even need wasm-bindgen here
-# if we export functions with simple signatures that wasmi can invoke.
-# Let's keep it minimal for now.
+
+# Ensure release builds (used for wasm32-unknown-unknown target) abort on panic
+[profile.release]
+panic = "abort"
+opt-level = "z" # Optimize for size
+lto = true
+strip = true 
