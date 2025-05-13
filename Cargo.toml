@@ -89,28 +89,18 @@ members = [
 
     # Test & Utility Crates
     "tests/simulation_runner",
-    "nodes/graviton_edge_node", # Added in previous step
-    "tools/aurora_testnet_cli",   # Added in previous step
+    "nodes/graviton_edge_node",
+    "tools/aurora_testnet_cli",
     "utils/sample_wasm_modules/sample_wasm_module_add", 
     "utils/sample_wasm_modules/sample_wasm_host_interaction"
 ]
 
-# Default build profile for release - primarily affects binaries in the workspace
+# Default build profile for release - primarily affects native binaries run with `cargo run --release`
+# or built with `cargo build --release` without a specific target.
 [profile.release]
 lto = true
 codegen-units = 1
-# panic = "abort" # Setting this globally might be too aggressive for dev binaries.
-                  # Let individual binaries (like nodes) decide if they want to abort on panic.
-                  # For libraries compiled to Wasm, they need panic=abort.
-strip = true
-opt-level = "z"
-
-# [profile.release.package.sample_wasm_module_add] # REMOVE THIS BLOCK
-# panic = "abort"
-# opt-level = "z" 
-# strip = true 
-
-# [profile.release.package.sample_wasm_host_interaction] # REMOVE THIS BLOCK
-# panic = "abort"
-# opt-level = "z" 
-# strip = true
+# IMPORTANT: No `panic` setting here. This allows individual crates (like Wasm libs)
+# to define their own panic strategy for their release profile.
+strip = true # Good for native binaries too
+opt-level = "s" # Optimize for size; "z" is more aggressive but can be slower.

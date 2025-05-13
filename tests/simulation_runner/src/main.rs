@@ -1,7 +1,8 @@
 use aethercore_runtime::ExecutionRequest;
-// Corrected imports for ecliptic_concordance
 use ecliptic_concordance::{submit_transaction_payload, sequencer_create_block, ConsensusState};
-use novavault_flux_finance::{FinancialOperationType as NovaVaultOpType, FinancialOperation};
+// Block and ConcordanceTransaction are not directly used by name in main's scope if types are inferred
+// use ecliptic_concordance::{ConcordanceTransaction, Block}; 
+use novavault_flux_finance::FinancialOperationType as NovaVaultOpType; // FinancialOperation not used directly
 use celestial_synapse_network_csn as csn;
 use starsenate_collectives_governance::{ProposalStatus, submit_proposal, cast_vote_on_proposal, tally_votes_and_decide};
 use soulstar_matrix_identity::create_celestial_id;
@@ -23,8 +24,6 @@ use wasmi::Value;
 use std::collections::HashMap;
 use sha2::{Sha256, Digest};
 use hex;
-// Removed: use std::sync::Mutex;
-// Removed: use once_cell::sync::Lazy;
 
 fn mock_hash_data<T: std::fmt::Debug>(data: &T) -> String {
     let mut hasher = Sha256::new(); hasher.update(format!("{:?}", data).as_bytes()); hex::encode(hasher.finalize())
@@ -52,7 +51,7 @@ fn run_financial_simulation_phase(user_did: &str, consensus_state: &mut Consensu
     let mut full_public_payload_for_novavault = public_payload_details.clone();
     full_public_payload_for_novavault.insert("fee_paid".to_string(), csn_suggested_fee.to_string());
 
-    let financial_op_result: FinancialOperation = novavault_flux_finance::process_financial_operation(
+    let financial_op_result = novavault_flux_finance::process_financial_operation(
         user_did, NovaVaultOpType::PrivateTransferAUC, full_public_payload_for_novavault, 
         private_inputs_data.clone(), target_block_height
     ).expect("NV process failed");
@@ -86,20 +85,18 @@ fn run_governance_simulation_phase(proposer_did_str: &str, voter_dids: Vec<&str>
     println!("\n--- Running Governance Simulation Phase (Targeting Block {}) ---", target_block_height);
     let target_module_id = "mock_contract_v1".to_string();
     let new_code_hash = mock_hash_data(&"new_wasm_code_for_v1_1_0_empty_bytecode_upgrade");
-    let proposal: starsenate_collectives_governance::Proposal = submit_proposal(proposer_did_str, "Upgrade mock_contract_v1 to v1.1.0", "Critical fix for mock contract.", Some(target_module_id.clone()), &new_code_hash).expect("Proposal submission failed");
+    let proposal = submit_proposal(proposer_did_str, "Upgrade mock_contract_v1 to v1.1.0", "Critical fix for mock contract.", Some(target_module_id.clone()), &new_code_hash).expect("Proposal submission failed");
     println!("  -> StarSenate: Proposal '{}' submitted. ID: {}, Futarchy Score: {:?}", proposal.title, proposal.id, proposal.futarchy_prediction_score);
     stl::update_trust_score(proposer_did_str, stl::GOVERNANCE_CONTEXT, 0.1, "Submitted proposal");
     for (i, voter_did_str) in voter_dids.iter().enumerate() {
         cast_vote_on_proposal(&proposal.id, voter_did_str, i % 2 == 0).expect("Vote failed");
         stl::update_trust_score(voter_did_str, stl::GOVERNANCE_CONTEXT, 0.05, "Voted");
     }
-    // Governance decisions like proposal outcomes also become part of a block
     let decision_payload = format!("Proposal: {}, Outcome: Mocked", proposal.id);
     submit_transaction_payload(consensus_state, decision_payload.into_bytes()).expect("Submit gov decision payload failed");
     let _gov_block = sequencer_create_block(consensus_state, "gov_sequencer").expect("Gov block creation failed");
 
-
-    match tally_votes_and_decide(&proposal.id, target_block_height) { // target_block_height for ISN record
+    match tally_votes_and_decide(&proposal.id, target_block_height) {
         Ok(ProposalStatus::Approved) => {
             println!("  -> StarSenate: Proposal ID '{}' APPROVED.", proposal.id);
             stl::update_trust_score(proposer_did_str, stl::GOVERNANCE_CONTEXT, 0.2, "Proposal approved");
@@ -119,12 +116,9 @@ fn run_von_simulation_phase(obligor_did_str: &str, obligee_did_str: &str, consen
     let obligation = von::create_fluxpact_contract(obligor_did_str, obligee_did_str, "Deliver resources", 50, due_timestamp, target_block_height).expect("Obligation creation failed");
     println!("  -> VON: Created Obligation ID: '{}'", obligation.id);
     stl::update_trust_score(obligor_did_str, stl::FINANCIAL_CONTEXT, -0.02, "Created obligation");
-    
-    // Submit VON creation to consensus
     let von_creation_payload = format!("VON_Create:{}", obligation.id);
     submit_transaction_payload(consensus_state, von_creation_payload.into_bytes()).expect("Submit VON create payload failed");
     let _von_create_block = sequencer_create_block(consensus_state, "von_sequencer").expect("VON create block failed");
-
 
     let fulfillment_proof_hash = mock_hash_data(&"Proof of delivery");
     match von::attest_obligation_fulfillment(&obligation.id, obligee_did_str, &fulfillment_proof_hash, get_next_target_block_height(consensus_state) ) {
@@ -132,7 +126,6 @@ fn run_von_simulation_phase(obligor_did_str: &str, obligee_did_str: &str, consen
             println!("  -> VON: Obligation ID '{}' fulfilled.", obligation.id);
             stl::update_trust_score(obligor_did_str, stl::FINANCIAL_CONTEXT, 0.15, "Fulfilled obligation");
             stl::update_trust_score(obligee_did_str, stl::FINANCIAL_CONTEXT, 0.01, "Attested fulfillment");
-            // Submit VON fulfillment to consensus
             let von_fulfill_payload = format!("VON_Fulfill:{}", obligation.id);
             submit_transaction_payload(consensus_state, von_fulfill_payload.into_bytes()).expect("Submit VON fulfill payload failed");
             let _von_fulfill_block = sequencer_create_block(consensus_state, "von_sequencer").expect("VON fulfill block failed");
@@ -149,7 +142,6 @@ fn run_ecological_simulation_phase(green_validator_did: &str, consensus_state: &
         Ok(credit) => {
             println!("  -> GaiaPulse: Minted EcoCredit for {} tons", credit.amount_co2e_sequestered_tons);
             stl::update_trust_score(green_validator_did, stl::GOVERNANCE_CONTEXT, 0.02, "Performed green op");
-            // Submit EcoCredit minting to consensus
             let eco_credit_payload = format!("EcoCreditMint:{}", credit.id);
             submit_transaction_payload(consensus_state, eco_credit_payload.into_bytes()).expect("Submit EcoCredit payload failed");
             let _eco_block = sequencer_create_block(consensus_state, "eco_sequencer").expect("Eco block creation failed");
@@ -159,7 +151,6 @@ fn run_ecological_simulation_phase(green_validator_did: &str, consensus_state: &
     let op_id_for_reward = format!("block_proposal_{}", target_block_height);
     if let Ok(Some(boost)) = calculate_and_distribute_fluxboost_reward(green_validator_did, 100, &op_id_for_reward, target_block_height) { 
         println!("  -> EcoNova: FluxBoost of {} distributed.", boost); 
-        // Submit FluxBoost reward to consensus
         let fluxboost_payload = format!("FluxBoost:{} for {}", boost, green_validator_did);
         submit_transaction_payload(consensus_state, fluxboost_payload.into_bytes()).expect("Submit FluxBoost payload failed");
         let _eco_reward_block = sequencer_create_block(consensus_state, "eco_sequencer").expect("Eco reward block failed");
@@ -175,14 +166,11 @@ fn run_developer_deployment_phase(developer_did: &str, consensus_state: &mut Con
     };
     println!("  -> AstroCLI: DApp '{}' (from crate {}) \"compiled\". Wasm Bytecode Hash: {}. Bytecode size: {}", compilation_output.dapp_name, wasm_module_crate_name, compilation_output.mock_wasm_bytecode_hash, compilation_output.wasm_bytecode.len());
     
-    // DApp deployment is an on-chain event
     let dapp_deploy_payload = format!("DAppDeploy:{}", compilation_output.dapp_name);
     submit_transaction_payload(consensus_state, dapp_deploy_payload.into_bytes()).expect("Submit DAppDeploy payload failed");
-    // Create a block to confirm the DApp deployment intent before actual deployment
     let _dapp_deploy_intent_block = sequencer_create_block(consensus_state, "dev_sequencer").expect("DAppDeploy intent block failed");
 
-
-    match request_dapp_deployment(compilation_output.clone(), "AetherCore_Target", target_block_height) { // Pass target_block_height for ISN record
+    match request_dapp_deployment(compilation_output.clone(), "AetherCore_Target", target_block_height) {
         Ok(deployed_module_id) => {
             println!("  -> AstroCLI: DApp '{}' deployment successful. Deployed (AetherCore) Module ID: '{}'", compilation_output.dapp_name, deployed_module_id);
             stl::update_trust_score(developer_did, stl::GOVERNANCE_CONTEXT, 0.1, &format!("Successfully deployed DApp: {}", compilation_output.dapp_name));
@@ -204,13 +192,14 @@ fn run_developer_deployment_phase(developer_did: &str, consensus_state: &mut Con
         Err(e) => { eprintln!("[DevSim] DApp deployment failed: {}", e); stl::update_trust_score(developer_did, stl::GOVERNANCE_CONTEXT, -0.1, &format!("Failed DApp deployment: {}", compilation_output.dapp_name)); None }
     }
 }
+
 fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str, normal_dapp_module_id: &str, consensus_state: &mut ConsensusState) {
-    let target_block_height = get_next_target_block_height(consensus_state); // Use current state for next block
+    let target_block_height = get_next_target_block_height(consensus_state);
     println!("\n--- Running Risk Mitigation & Ethical Oversight Simulation Phase (Targeting Block {}) ---", target_block_height);
     println!("\n  Scenario 1: Developer '{}' attempts to deploy 'malicious_dapp_attempt'...", malicious_dev_did);
-    run_developer_deployment_phase(malicious_dev_did, consensus_state, "malicious_dapp_attempt"); // Pass &mut consensus_state
+    run_developer_deployment_phase(malicious_dev_did, consensus_state, "malicious_dapp_attempt");
     println!("\n  Scenario 2: Developer '{}' attempts to deploy 'risky_dapp_code'...", risky_dev_did);
-    run_developer_deployment_phase(risky_dev_did, consensus_state, "risky_dapp_code"); // Pass &mut consensus_state
+    run_developer_deployment_phase(risky_dev_did, consensus_state, "risky_dapp_code");
     println!("\n  Scenario 3: Deployed DApp '{}' performs an anomalous operation...", normal_dapp_module_id);
     if normal_dapp_module_id.is_empty() || normal_dapp_module_id == "malicious_dapp_attempt" || normal_dapp_module_id == "risky_dapp_code" { 
         println!("  Skipping anomaly test for '{}' as it's not a valid deployed module for this test.", normal_dapp_module_id); return; 
@@ -223,6 +212,7 @@ fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str
         let _ = generate_integrity_report(normal_dapp_module_id, "DAppRuntimeAnomaly", vec![format!("Anomaly detected: {:?}", anomaly)], 3, vec!["Quarantine module.".to_string()], target_block_height + 1);
     } else { println!("  -> NebulaShield: No anomaly detected for module '{}'.", normal_dapp_module_id); }
 }
+
 fn run_reality_sync_prediction_phase(sensor_operator_did: &str, consensus_state: &mut ConsensusState) {
     let target_block_height = get_next_target_block_height(consensus_state);
     println!("\n--- Running Reality Sync & Prediction Simulation Phase (Targeting Block {}) ---", target_block_height);
@@ -238,7 +228,6 @@ fn run_reality_sync_prediction_phase(sensor_operator_did: &str, consensus_state:
     };
     println!("  -> EonMirror: Ingested data, ISN Node ID: {}", isn_data_node.id);
     stl::update_trust_score(sensor_operator_did, stl::FINANCIAL_CONTEXT, 0.01, "Provided sensor data");
-    // Simulate consensus confirmation of the data point
     submit_transaction_payload(consensus_state, format!("RWData:{}", isn_data_node.id).into_bytes()).expect("Submit RWData payload failed");
     let _rw_block = sequencer_create_block(consensus_state, "reality_sequencer").expect("RWData block failed");
 
@@ -252,7 +241,8 @@ fn run_reality_sync_prediction_phase(sensor_operator_did: &str, consensus_state:
         Err(e) => eprintln!("[RealitySync] Error generating prediction: {}", e),
     }
 }
-fn run_isn_graph_query_phase(developer_did: &str, _consensus_state: &ConsensusState) { // block_height (now _consensus_state) is unused
+
+fn run_isn_graph_query_phase(developer_did: &str, _consensus_state: &ConsensusState) {
     println!("\n--- Running ISN Graph Query Simulation Phase for Developer {} ---", developer_did);
     let query_str = format!("GET_DEPLOYED_MODULES_BY_DEV_DID {}", developer_did);
     println!("  -> ISN Query: {}", query_str);
@@ -266,10 +256,10 @@ fn main() {
     println!("=== Aurora Full Lifecycle Simulation (All Phases including Gas & Graph Query) ===");
     
     let mut consensus_state = ConsensusState::new("simulation_runner_node".to_string());
-    let initial_block_height_for_records = get_next_target_block_height(&consensus_state);
-
 
     println!("\n--- Running Identity Creation & STL Initialization Phase ---");
+    let initial_block_height_for_records = get_next_target_block_height(&consensus_state); 
+
     let user_punk_did = create_celestial_id("user_punk_789", "pk_punk", initial_block_height_for_records).unwrap().did;
     let dev_aurora_did = create_celestial_id("developer_aurora_core_001", "pk_dev_core", initial_block_height_for_records).unwrap().did;
     let voter_alpha_did = create_celestial_id("voter_alpha_stl_green", "pk_voter_a", initial_block_height_for_records).unwrap().did;
@@ -283,7 +273,6 @@ fn main() {
     let mut all_dids_for_stl_strings = vec![user_punk_did.clone(), dev_aurora_did.clone(), voter_alpha_did.clone(), other_voters_temp[0].clone(), other_voters_temp[1].clone(), obligee_did_str.clone(), dapp_developer_did.clone(), malicious_dev_did.clone(), risky_dev_did.clone()];
     all_dids_for_stl_strings.iter().for_each(|did_str| stl::initialize_entity_trust(did_str));
     let _identity_block = sequencer_create_block(&mut consensus_state, "identity_sequencer").expect("Identity block creation failed");
-
 
     run_financial_simulation_phase(&user_punk_did, &mut consensus_state);
     run_governance_simulation_phase(&dev_aurora_did, other_voters.clone(), &mut consensus_state);
