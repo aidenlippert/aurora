@@ -8,3 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # No special dependencies needed for this simple example
+
+# Add panic = "abort" for release builds to satisfy no_std Wasm requirements
+[profile.release]
+panic = "abort"
