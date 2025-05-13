@@ -6,4 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+uuid = { version = "1.8.0", features = ["v4"] }
+nebula_pulse_swarm = { path = "../nebula_pulse_swarm" }
+serde = { version = "1.0", features = ["derive"] }
  # Add dependencies here

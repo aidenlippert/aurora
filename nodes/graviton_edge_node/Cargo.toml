@@ -1,0 +1,15 @@
+[package]
+name = "graviton_edge_node"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Aurora workspace crates
+ecliptic_concordance = { path = "../../sgs_foundations/ecliptic_concordance" }
+triad_web = { path = "../../sgs_foundations/triad_web" } # For InMemoryP2PNetwork
+# Utility crates
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0" # For serializing/deserializing messages
+tokio = { version = "1", features = ["full"] } # For async runtime, timers
+uuid = { version = "1.8.0", features = ["v4"] }
+clap = { version = "4.0", features = ["derive"] } # For command line argument parsing

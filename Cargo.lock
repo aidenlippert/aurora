@@ -7,6 +7,7 @@ name = "aethercore_runtime"
 version = "0.1.0"
 dependencies = [
  "once_cell",
+ "serde",
  "uuid",
  "wasmi",
 ]
@@ -48,6 +49,7 @@ dependencies = [
  "novavault_flux_finance",
  "oraclesync_futarchy",
  "primeaxiom_vault",
+ "semantic_synapse_interfaces",
  "serde",
  "sha2",
  "soulstar_matrix_identity",
@@ -102,6 +104,7 @@ name = "cosmic_data_constellation"
 version = "0.1.0"
 dependencies = [
  "once_cell",
+ "serde",
  "uuid",
 ]
 
@@ -175,6 +178,7 @@ name = "ecliptic_concordance"
 version = "0.1.0"
 dependencies = [
  "once_cell",
+ "serde",
  "uuid",
  "voidproof_engine_zkp",
 ]
@@ -249,6 +253,11 @@ version = "0.1.0"
 [[package]]
 name = "graviton_edge"
 version = "0.1.0"
+dependencies = [
+ "nebula_pulse_swarm",
+ "serde",
+ "uuid",
+]
 
 [[package]]
 name = "hex"
@@ -290,6 +299,7 @@ checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 name = "nebula_pulse_swarm"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "uuid",
 ]
 
@@ -345,6 +355,7 @@ dependencies = [
  "cosmic_data_constellation",
  "hex",
  "semantic_synapse_interfaces",
+ "serde",
  "sha2",
  "uuid",
  "voidproof_engine_zkp",
@@ -429,6 +440,9 @@ version = "0.1.0"
 [[package]]
 name = "semantic_synapse_interfaces"
 version = "0.1.0"
+dependencies = [
+ "cosmic_data_constellation",
+]
 
 [[package]]
 name = "serde"
@@ -531,6 +545,11 @@ dependencies = [
 [[package]]
 name = "titanforge_grid"
 version = "0.1.0"
+dependencies = [
+ "graviton_edge",
+ "serde",
+ "uuid",
+]
 
 [[package]]
 name = "truthforge_collective"
