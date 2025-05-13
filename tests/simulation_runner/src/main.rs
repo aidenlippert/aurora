@@ -1,6 +1,5 @@
 use aethercore_runtime::ExecutionRequest;
-// Corrected import: ConcordanceTransaction instead of Transaction
-use ecliptic_concordance::{ConcordanceTransaction, Block, TransactionPayload, submit_transaction_payload, sequencer_create_block, validate_and_apply_block};
+use ecliptic_concordance::{ConcordanceTransaction, Block, submit_transaction_payload, sequencer_create_block, validate_and_apply_block}; // Removed TransactionPayload
 use novavault_flux_finance::{FinancialOperationType as NovaVaultOpType, FinancialOperation};
 use celestial_synapse_network_csn as csn;
 use starsenate_collectives_governance::{ProposalStatus, submit_proposal, cast_vote_on_proposal, tally_votes_and_decide};
@@ -10,28 +9,24 @@ use verifiable_obligation_nexus_von as von;
 use gaiapulse_engine::process_green_operation_attestation;
 use econova_incentives::calculate_and_distribute_fluxboost_reward;
 use astrocli_deployment_nexus::{compile_dapp_mock, request_dapp_deployment, MockDappCompilation};
-// use primeaxiom_vault::CodeToCheck; // Unused
 use nexus_cosmic_introspection_nci::generate_integrity_report;
 use nebulashield_defenses::OperationTrace;
-// use nebulashield_defenses::AnomalyType; // Unused
-use cosmic_justice_enforcers::MisbehaviorType; // apply_penalty_for_misbehavior called via module
-
+use cosmic_justice_enforcers::MisbehaviorType;
 use eonmirror_interface::{ingest_real_world_data, RealWorldDataPoint};
 use chronoforge_simulator::generate_prediction_from_isn_data;
-// use chronoforge_simulator::Prediction; // Unused
 use gaiapulse_engine::react_to_environmental_prediction;
 use semantic_synapse_interfaces;
+use serde_json; // For serializing payload in financial sim phase
 
 use wasmi::Value;
 use std::collections::HashMap;
 use sha2::{Sha256, Digest};
 use hex;
-use serde_json; // For serializing TransactionPayload
 
-fn mock_hash_data<T: std::fmt::Debug>(data: &T) -> String {
+fn mock_hash_data<T: std::fmt::Debug>(data: &T) -> String { /* ... */
     let mut hasher = Sha256::new(); hasher.update(format!("{:?}", data).as_bytes()); hex::encode(hasher.finalize())
 }
-fn get_next_mock_block_height() -> u64 {
+fn get_next_mock_block_height() -> u64 { /* ... */
     static mut MOCK_HEIGHT_COUNTER: u64 = 0; unsafe { MOCK_HEIGHT_COUNTER += 1; MOCK_HEIGHT_COUNTER }
 }
 
@@ -59,25 +54,21 @@ fn run_financial_simulation_phase(user_did: &str, block_height: u64) {
     if let Some(ref _proof) = financial_op_result.zk_proof { stl::update_trust_score(user_did, stl::FINANCIAL_CONTEXT, 0.05, "Generated ZKP"); }
 
     // --- Consensus Part for the Financial Operation ---
-    // 1. Create a generic TransactionPayload for consensus
+    // Serialize the *payload* of the financial operation for consensus (or a hash of it)
     let consensus_payload_data = serde_json::to_vec(&financial_op_result.payload).expect("Failed to serialize fin_op payload for consensus");
     
-    // 2. Submit this payload to EclipticConcordance's mempool
-    let submitted_tx_id = submit_transaction_payload(consensus_payload_data)
+    let submitted_tx_id = submit_transaction_payload(consensus_payload_data) // This now takes Vec<u8>
         .expect("Failed to submit payload to consensus mempool");
     println!("  -> EclipticConcordance: Payload for financial op submitted, TxID: {}", submitted_tx_id);
 
-    // 3. Simulate sequencer creating a block (the runner acts as the trigger)
-    let sequencer_node_id = "sim_runner_sequencer"; // Mock sequencer ID
+    let sequencer_node_id = "sim_runner_sequencer";
     let new_block = sequencer_create_block(sequencer_node_id)
         .expect("Sequencer failed to create block");
     println!("  -> EclipticConcordance: Sequencer created Block Height: {}", new_block.height);
 
-    // 4. Simulate other nodes validating this block (in this single-process mock, we validate it against the same state)
     validate_and_apply_block(&new_block).expect("Block validation failed by self");
     println!("  -> EclipticConcordance: Block finalized and applied. ID: '{}', Height: {}", new_block.id, new_block.height);
     // --- End Consensus Part ---
-
 
     let exec_req = ExecutionRequest { module_id: "private_auc_handler_v1".to_string(), function_name: "log_private_op_intent".to_string(), arguments: Vec::new(), gas_limit: 500 };
     if let Ok(exec_res) = aethercore_runtime::execute_module(exec_req) { 
@@ -91,7 +82,7 @@ fn run_financial_simulation_phase(user_did: &str, block_height: u64) {
     csn::monitor_novavault_activity_patterns();
     if let Ok(bal) = novavault_flux_finance::get_account_balance(user_did, "AUC_PRIVATE") { println!("  -> NovaVault: Balance for {} (AUC_PRIVATE): {} (mock ISN)", user_did, bal); }
 }
-fn run_governance_simulation_phase(proposer_did_str: &str, voter_dids: Vec<&str>, block_height: u64) { /* Omitted - same logic, just ensure it runs */
+fn run_governance_simulation_phase(proposer_did_str: &str, voter_dids: Vec<&str>, block_height: u64) { /* Omitted - same */
     println!("\n--- Running Governance Simulation Phase ---");
     let target_module_id = "mock_contract_v1".to_string();
     let new_code_hash = mock_hash_data(&"new_wasm_code_for_v1_1_0_empty_bytecode_upgrade");
@@ -172,8 +163,8 @@ fn run_developer_deployment_phase(developer_did: &str, block_height: u64, wasm_m
         Err(e) => { eprintln!("[DevSim] DApp deployment failed: {}", e); stl::update_trust_score(developer_did, stl::GOVERNANCE_CONTEXT, -0.1, &format!("Failed DApp deployment: {}", compilation_output.dapp_name)); None }
     }
 }
-fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str, normal_dapp_module_id: &str, _block_height: u64) { // _block_height was unused
-    let current_block_height = get_next_mock_block_height(); // Use a fresh block height for this phase
+fn run_risk_ethics_simulation_phase(malicious_dev_did: &str, risky_dev_did: &str, normal_dapp_module_id: &str, _block_height: u64) {
+    let current_block_height = get_next_mock_block_height();
     println!("\n--- Running Risk Mitigation & Ethical Oversight Simulation Phase ---");
     println!("\n  Scenario 1: Developer '{}' attempts to deploy 'malicious_dapp_attempt' (name triggers ethical check)...", malicious_dev_did);
     run_developer_deployment_phase(malicious_dev_did, current_block_height, "malicious_dapp_attempt");
@@ -215,7 +206,7 @@ fn run_reality_sync_prediction_phase(sensor_operator_did: &str, block_height: u6
         Err(e) => eprintln!("[RealitySync] Error generating prediction: {}", e),
     }
 }
-fn run_isn_graph_query_phase(developer_did: &str, _block_height: u64) { /* Omitted - same */
+fn run_isn_graph_query_phase(developer_did: &str, _block_height: u64) {
     println!("\n--- Running ISN Graph Query Simulation Phase for Developer {} ---", developer_did);
     let query_str = format!("GET_DEPLOYED_MODULES_BY_DEV_DID {}", developer_did);
     println!("  -> ISN Query: {}", query_str);
@@ -247,7 +238,7 @@ fn main() {
     run_von_simulation_phase(&user_punk_did, &obligee_did_str, get_next_mock_block_height());
     run_ecological_simulation_phase(&voter_alpha_did, get_next_mock_block_height());
     let deployed_adder_module_id = run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "sample_wasm_module_add")
-        .unwrap_or_else(|| "sample_wasm_module_add".to_string()); // Use the crate name as fallback ID
+        .unwrap_or_else(|| "sample_wasm_module_add".to_string());
     run_developer_deployment_phase(&dapp_developer_did, get_next_mock_block_height(), "sample_wasm_host_interaction");
     run_reality_sync_prediction_phase(&voter_alpha_did, get_next_mock_block_height());
     run_risk_ethics_simulation_phase(&malicious_dev_did, &risky_dev_did, &deployed_adder_module_id, get_next_mock_block_height());
