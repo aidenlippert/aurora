@@ -19,7 +19,7 @@ use std::io::{self, BufRead, Write, BufReader as StdBufReader};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::sync::Arc;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet}; // Added HashSet for confirmed_blocks_cache
 
 use tokio::sync::Mutex as TokioMutex;
 use tokio::net::TcpListener;
@@ -33,6 +33,20 @@ const MAX_BLOCKS_PER_BATCH_RESPONSE: u32 = 20;
 const MAX_BLOCKS_TO_REQUEST_IN_SYNC: u32 = 50;
 const SYNC_RETRY_TIMEOUT_SECS: u64 = 30;
 const SYNC_STUCK_THRESHOLD_SECS: u64 = SYNC_RETRY_TIMEOUT_SECS * 2 / 3;
+
+// --- Configuration for Mock Validators ---
+// !!! IMPORTANT: REPLACE THESE WITH THE ACTUAL PEER IDS OF YOUR VALIDATOR NODES !!!
+// These PeerIDs are obtained by running validator-node2 and validator-node3 once
+// with fresh (or their persistent) node_key.pk8 files and noting their logged PeerID.
+const MOCK_VALIDATOR_PEER_IDS: [&str; 2] = [
+    "12D3KooWBHQ3zJtx53NboGRHz3jbsECd8TxV3BguWpvvdbFVdBue", // Example: validator-node2's actual PeerID string
+    "12D3KooWML8EPttkYasdVJPRzfrXha2VTiENAiJ4U4DnhiSLqzGS", // Example: validator-node3's actual PeerID string
+];
+// If ATTESTATION_THRESHOLD is 1, one validator attesting is enough.
+// If ATTESTATION_THRESHOLD is 2, both validators must attest.
+const ATTESTATION_THRESHOLD: usize = 1; 
+// --- End Configuration ---
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NodeSyncState {
@@ -60,6 +74,11 @@ struct Args {
 
 fn load_consensus_state_from_disk(node_name: &str, blockchain_file_path: &Path) -> NodeLocalConsensusState {
     let mut state = NodeLocalConsensusState::new(node_name.to_string());
+    state.set_validators(
+        MOCK_VALIDATOR_PEER_IDS.iter().map(|s| s.to_string()).collect(),
+        ATTESTATION_THRESHOLD
+    );
+
     if blockchain_file_path.exists() {
         if let Ok(file) = File::open(blockchain_file_path) {
             let reader = StdBufReader::new(file);
@@ -68,12 +87,17 @@ fn load_consensus_state_from_disk(node_name: &str, blockchain_file_path: &Path) 
             for line in reader.lines() {
                 if let Ok(line_content) = line {
                     if !line_content.trim().is_empty() {
-                        if let Ok(block) = serde_json::from_str::<Block>(&line_content) {
+                        if let Ok(mut block) = serde_json::from_str::<Block>(&line_content) {
                             if block.height == 0 && state.current_height == 0 && state.last_block_hash == "GENESIS_HASH_0.0.1" && !genesis_block_processed_from_file {
                                 state.current_height = block.height;
                                 state.last_block_hash = block.block_hash.clone();
                                 genesis_block_processed_from_file = true;
                                 trace!("[Node:{}] Loaded genesis block H:0 from file.", node_name);
+                                // Mark as confirmed if it meets criteria (e.g. genesis or already has flag)
+                                if block.height == 0 || state.block_attestations.get(&block.block_hash).map_or(false, |a| a.len() >= state.attestation_threshold) {
+                                    // For simplicity, we won't try to update the Block struct's field from here during load.
+                                    // The block_attestations map will be the source of truth for confirmation status of loaded blocks.
+                                }
                             } else if block.height == state.current_height + 1 && block.prev_block_hash == state.last_block_hash {
                                 state.current_height = block.height;
                                 state.last_block_hash = block.block_hash.clone();
@@ -100,7 +124,6 @@ fn load_consensus_state_from_disk(node_name: &str, blockchain_file_path: &Path) 
     }
     state
 }
-
 
 fn read_blocks_from_file(
     blockchain_file_path: &Path,
@@ -171,7 +194,7 @@ async fn send_block_request_range_to_peer(
     local_peer_id_str: String,
     target_sync_peer: PeerId,
     start_h: u64,
-    end_h: u64, // This is the highest_known_height from the peer for this sync cycle
+    end_h: u64,
 ) {
     let sync_req_msg = NetworkMessage::BlockRequestRange {
         start_height: start_h,
@@ -211,12 +234,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let rpc_listen_addr_str = format!("127.0.0.1:{}", rpc_port);
     info!("[Node:{}] RPC server will listen on: {}", args.node_name, rpc_listen_addr_str);
 
-    let consensus_state_arc = Arc::new(TokioMutex::new(
-        load_consensus_state_from_disk(&args.node_name, &blockchain_file_path)
-    ));
+    let mut initial_consensus_state = load_consensus_state_from_disk(&args.node_name, &blockchain_file_path);
+    initial_consensus_state.set_validators(
+        MOCK_VALIDATOR_PEER_IDS.iter().map(|s| s.to_string()).collect(),
+        ATTESTATION_THRESHOLD
+    );
+    let consensus_state_arc = Arc::new(TokioMutex::new(initial_consensus_state));
 
     let current_sync_state_arc = Arc::new(TokioMutex::new(NodeSyncState::Synced));
     let buffered_future_blocks_arc = Arc::new(TokioMutex::new(HashMap::<u64, Block>::new()));
+    // Cache of locally confirmed block hashes by this node (through receiving attestations)
+    let locally_confirmed_blocks_cache_arc = Arc::new(TokioMutex::new(HashSet::<String>::new()));
 
 
     let listen_multiaddrs: Vec<Multiaddr> = args.listen_addrs.split(',')
@@ -290,6 +318,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let blockchain_file_path_clone = blockchain_file_path.clone();
         let consensus_state_sequencer_arc = consensus_state_arc.clone();
         let sync_state_sequencer_check = current_sync_state_arc.clone();
+        let locally_confirmed_blocks_cache_sequencer = locally_confirmed_blocks_cache_arc.clone();
+
 
         tokio::spawn(async move {
             loop {
@@ -306,9 +336,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
 
                 let mut local_consensus_state = consensus_state_sequencer_arc.lock().await;
+                
+                // Sequencer waits for its last block to be confirmed (by others) before proposing a new one
+                // unless it's the very first block (height 0) or chain is just starting.
+                let last_block_hash_to_check = local_consensus_state.last_block_hash.clone();
+                let current_height_to_check = local_consensus_state.current_height;
+
+                if current_height_to_check > 0 || (current_height_to_check == 0 && last_block_hash_to_check != "GENESIS_HASH_0.0.1") { // If not at true genesis
+                    let is_last_block_confirmed = locally_confirmed_blocks_cache_sequencer.lock().await.contains(&last_block_hash_to_check);
+                    if !is_last_block_confirmed {
+                        debug!("[Node:{}:Seq] Last produced block H:{} Hash:{:.8} not yet confirmed by attestations. Waiting to propose next.", 
+                            seq_node_name, current_height_to_check, last_block_hash_to_check);
+                        continue; // Skip proposing if last block isn't confirmed
+                    }
+                }
+
+
                 match sequencer_create_block(&mut local_consensus_state, &seq_node_name) {
                     Ok(new_block) => {
                         info!("[Node:{}:Seq] Created Block H:{}. Publishing...", seq_node_name, new_block.height);
+                        // The sequencer's own block is not yet "confirmed by others" when just created
+                        // It will become confirmed when it receives attestations for it.
+                        
                         if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&blockchain_file_path_clone) {
                             if writeln!(file, "{}", serde_json::to_string(&new_block).unwrap_or_default()).is_err() {
                                 error!("[Node:{}:Seq] Failed to write block to file.", seq_node_name);
@@ -351,29 +400,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                periodic_sync_check_node_name, SYNC_STUCK_THRESHOLD_SECS, next_expected_batch_start_height);
                         
                         if let Some(peer_to_retry_with) = target_peer {
-                            let current_cs_height = periodic_sync_check_consensus_state.lock().await.current_height;
-                            if next_expected_batch_start_height <= highest_known_height && next_expected_batch_start_height > current_cs_height { // Corrected logic here
-                                // Drop guard before await, then re-acquire to update
-                                drop(sync_state_guard); 
-                                send_block_request_range_to_peer(
-                                    periodic_sync_check_p2p_service.clone(),
-                                    periodic_sync_check_node_name.clone(),
-                                    periodic_sync_check_local_peer_id_str.clone(),
-                                    peer_to_retry_with,
-                                    next_expected_batch_start_height,
-                                    highest_known_height
-                                ).await;
-                                let mut sync_state_guard_update = periodic_sync_check_sync_state.lock().await;
-                                if let NodeSyncState::AttemptingSync { last_request_time: ref mut time_ref, .. } = *sync_state_guard_update {
-                                    *time_ref = tokio::time::Instant::now();
-                                }
-                                // sync_state_guard_update is dropped here when it goes out of scope
+                            let cs_lock = periodic_sync_check_consensus_state.lock().await;
+                            let current_cs_height = cs_lock.current_height;
+                            let current_cs_last_hash = cs_lock.last_block_hash.clone();
+                            drop(cs_lock);
+
+                            let retry_start_height = if current_cs_height == 0 && current_cs_last_hash == "GENESIS_HASH_0.0.1" {
+                                0
                             } else {
-                                 info!("[Node:{}:SyncCheck] Sync stuck but conditions for re-request not met (next_expected: {}, highest_known: {}, current: {}).",
-                                       periodic_sync_check_node_name, next_expected_batch_start_height, highest_known_height, current_cs_height);
-                                 if target_peer.is_none() || (highest_known_height <= current_cs_height && next_expected_batch_start_height > current_cs_height) {
-                                     *sync_state_guard = NodeSyncState::Synced;
-                                 }
+                                next_expected_batch_start_height
+                            };
+                            
+                            if retry_start_height <= highest_known_height {
+                                if retry_start_height > current_cs_height || (retry_start_height == 0 && current_cs_height == 0 && current_cs_last_hash == "GENESIS_HASH_0.0.1") {
+                                    drop(sync_state_guard);
+                                    send_block_request_range_to_peer(
+                                        periodic_sync_check_p2p_service.clone(),
+                                        periodic_sync_check_node_name.clone(),
+                                        periodic_sync_check_local_peer_id_str.clone(),
+                                        peer_to_retry_with,
+                                        retry_start_height,
+                                        highest_known_height
+                                    ).await;
+                                    let mut sync_state_guard_update = periodic_sync_check_sync_state.lock().await;
+                                    if let NodeSyncState::AttemptingSync { last_request_time: ref mut time_ref, .. } = *sync_state_guard_update {
+                                        *time_ref = tokio::time::Instant::now();
+                                    }
+                                } else {
+                                    info!("[Node:{}:SyncCheck] Sync stuck, but retry_start_height ({}) is not valid given current height ({}). Current state might have advanced. Resetting.",
+                                           periodic_sync_check_node_name, retry_start_height, current_cs_height);
+                                    *sync_state_guard = NodeSyncState::Synced;
+                                }
+                            } else {
+                                 info!("[Node:{}:SyncCheck] Sync stuck, but retry_start_height ({}) > highest_known_height ({}). Resetting.",
+                                       periodic_sync_check_node_name, retry_start_height, highest_known_height);
+                                 *sync_state_guard = NodeSyncState::Synced;
                             }
                         } else {
                             warn!("[Node:{}:SyncCheck] Sync stuck, but no target_peer. Resetting to Synced to allow new peer discovery on next block event.", periodic_sync_check_node_name);
@@ -385,7 +446,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     let mut buffered_map_guard = periodic_buffered_blocks_arc.lock().await;
                     if !buffered_map_guard.is_empty() {
                         let mut cs_lock = periodic_sync_check_consensus_state.lock().await;
-                        let mut next_to_apply_height = cs_lock.current_height + 1;
+                        let mut next_to_apply_height = if cs_lock.current_height == 0 && cs_lock.last_block_hash == "GENESIS_HASH_0.0.1" {
+                            0
+                        } else {
+                            cs_lock.current_height + 1
+                        };
                         let mut applied_from_buffer_count = 0;
                         while let Some(block) = buffered_map_guard.remove(&next_to_apply_height) {
                             if validate_and_apply_block(&mut cs_lock, &block).is_ok() {
@@ -417,6 +482,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let blockchain_file_path_for_handler = blockchain_file_path.clone();
         let local_peer_id_str_for_req = local_peer_id.to_string();
         let buffered_blocks_main_loop_clone = buffered_future_blocks_arc.clone();
+        let locally_confirmed_blocks_cache_main_loop = locally_confirmed_blocks_cache_arc.clone();
+
 
         tokio::select! {
             Some(app_event) = app_event_rx.recv() => {
@@ -433,57 +500,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                                         let mut local_consensus_state_lock = consensus_state_arc.lock().await;
                                         let current_node_height = local_consensus_state_lock.current_height;
+                                        let current_last_hash = local_consensus_state_lock.last_block_hash.clone();
 
-                                        if block.height > current_node_height + 1 {
+                                        let is_block_advanced = block.height > current_node_height + 1 ||
+                                                                (block.height == 0 && !(current_node_height == 0 && current_last_hash == "GENESIS_HASH_0.0.1"));
+
+                                        if is_block_advanced {
                                             debug!("[Node:{}] Received advanced block H:{} from {:?} (current H:{}). Buffering.",
                                                 node_name_for_loop_logging, block.height, source, current_node_height);
                                             buffered_blocks_main_loop_clone.lock().await.insert(block.height, block.clone());
 
                                             let mut should_initiate_new_sync_cycle = false;
-                                            let mut new_target_peer_for_cycle = source; 
+                                            let mut new_target_peer_for_cycle = source;
                                             let mut new_highest_known_for_cycle = block.height;
 
                                             match *current_sync_state_guard {
                                                 NodeSyncState::Synced => {
-                                                    info!("[Node:{}] Synced, but saw advanced block H:{}. Initiating sync.", node_name_for_loop_logging, block.height);
+                                                    info!("[Node:{}] Synced (current H:{}, last_hash:{:.8}), but saw advanced block H:{}. Initiating sync.",
+                                                          node_name_for_loop_logging, current_node_height, current_last_hash, block.height);
                                                     should_initiate_new_sync_cycle = true;
                                                 }
                                                 NodeSyncState::AttemptingSync { target_peer: Some(current_target_p), highest_known_height: current_highest, last_request_time, .. } => {
                                                     if block.height > current_highest {
                                                         if let NodeSyncState::AttemptingSync { ref mut highest_known_height, ..} = *current_sync_state_guard {
-                                                            *highest_known_height = block.height; // Update target height
-                                                            debug!("[Node:{}] Sync in progress with {:?}. Updated target_height to {} due to new block from {:?}.",
+                                                            *highest_known_height = block.height;
+                                                             debug!("[Node:{}] Sync in progress with {:?}. Updated target_height to {} due to new block from {:?}.",
                                                                    node_name_for_loop_logging, current_target_p, block.height, source);
                                                         }
-                                                        new_highest_known_for_cycle = block.height; // Use new block's height for potential new cycle
+                                                        new_highest_known_for_cycle = block.height;
                                                     } else {
-                                                        new_highest_known_for_cycle = current_highest; // Keep current highest if new block isn't higher
+                                                        new_highest_known_for_cycle = current_highest;
                                                     }
 
                                                     if source != current_target_p && block.height > current_highest {
                                                         info!("[Node:{}] Switching sync target from {:?} to {:?} due to significantly newer block H:{}.",
                                                               node_name_for_loop_logging, current_target_p, source, block.height);
                                                         should_initiate_new_sync_cycle = true;
-                                                        // new_target_peer_for_cycle is already 'source'
                                                     } else if last_request_time.elapsed() > Duration::from_secs(SYNC_STUCK_THRESHOLD_SECS) {
                                                         info!("[Node:{}] Current sync target {:?} seems stuck (elapsed {:?}). Re-initiating sync cycle, possibly with same peer for new height {}.",
                                                               node_name_for_loop_logging, current_target_p, last_request_time.elapsed(), new_highest_known_for_cycle);
                                                         should_initiate_new_sync_cycle = true;
-                                                        new_target_peer_for_cycle = current_target_p; // Try same peer first for the (potentially updated) height
+                                                        new_target_peer_for_cycle = current_target_p;
                                                     } else {
                                                         trace!("[Node:{}] Already syncing with {:?}. New block from {:?} (H:{}) noted. Current highest target is {}.",
                                                                node_name_for_loop_logging, current_target_p, source, block.height, new_highest_known_for_cycle);
                                                     }
                                                 }
-                                                NodeSyncState::AttemptingSync { target_peer: None, .. } => { 
+                                                NodeSyncState::AttemptingSync { target_peer: None, .. } => {
                                                     info!("[Node:{}] Was AttemptingSync but no target_peer. Initiating sync with {:?}.", node_name_for_loop_logging, source);
                                                     should_initiate_new_sync_cycle = true;
                                                 }
                                             }
 
                                             if should_initiate_new_sync_cycle {
-                                                let next_expected_sync_start = current_node_height + 1;
-                                                if next_expected_sync_start <= new_highest_known_for_cycle { 
+                                                let next_expected_sync_start = if current_node_height == 0 && current_last_hash == "GENESIS_HASH_0.0.1" {
+                                                    0
+                                                } else {
+                                                    current_node_height + 1
+                                                };
+
+                                                if next_expected_sync_start <= new_highest_known_for_cycle {
                                                     info!("[Node:{}] Setting new sync cycle: TargetPeer:{:?}, HighestKnown:{}, NextExpectedBatchStart:{}",
                                                         node_name_for_loop_logging, new_target_peer_for_cycle, new_highest_known_for_cycle, next_expected_sync_start);
                                                     *current_sync_state_guard = NodeSyncState::AttemptingSync {
@@ -502,12 +578,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                         next_expected_sync_start,
                                                         new_highest_known_for_cycle
                                                     ).await;
+                                                    continue;
                                                 } else {
                                                     debug!("[Node:{}] Advanced block seen (H:{}), but no range to request (current H:{}, next_expected_sync_start:{}). Relying on gossip/buffer.",
                                                            node_name_for_loop_logging, block.height, current_node_height, next_expected_sync_start);
                                                 }
                                             }
-                                        } else if matches!(*current_sync_state_guard, NodeSyncState::Synced) && block.height == current_node_height + 1 {
+                                        } else if matches!(*current_sync_state_guard, NodeSyncState::Synced) &&
+                                                  ( (block.height == current_node_height + 1) || (block.height == 0 && current_node_height == 0 && current_last_hash == "GENESIS_HASH_0.0.1") )
+                                        {
                                             match validate_and_apply_block(&mut local_consensus_state_lock, &block) {
                                                 Ok(()) => {
                                                     info!("[Node:{}] Applied gossiped Block H:{} from {} (PeerId: {:?})", node_name_for_loop_logging, block.height, block.proposer_id, source);
@@ -515,6 +594,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                         if writeln!(file, "{}", serde_json::to_string(&block).unwrap_or_default()).is_err(){
                                                             error!("[Node:{}] Failed to write applied gossiped block H:{} to file", node_name_for_loop_logging, block.height);
                                                         }
+                                                    }
+                                                    if !is_sequencer {
+                                                        info!("[Node:{}] Non-sequencer applied block H:{}, preparing attestation.", node_name_for_loop_logging, block.height);
+                                                        let attestation_msg = NetworkMessage::BlockAttestation {
+                                                            block_hash: block.block_hash.clone(),
+                                                            block_height: block.height,
+                                                            attestor_peer_id_str: local_peer_id_str_for_req.clone(),
+                                                        };
+                                                        let p2p_clone_for_attestation = p2p_service_for_spawn.clone();
+                                                        let node_name_for_attestation = node_name_for_loop_logging.clone();
+                                                        drop(local_consensus_state_lock);
+                                                        drop(current_sync_state_guard);
+
+                                                        tokio::spawn(async move {
+                                                            if let Err(e) = p2p_clone_for_attestation.publish(AuroraTopic::Attestations, attestation_msg).await {
+                                                                error!("[Node:{}] Failed to publish block attestation: {}", node_name_for_attestation, e);
+                                                            } else {
+                                                                info!("[Node:{}] Published attestation for H:{}", node_name_for_attestation, block.height);
+                                                            }
+                                                        });
+                                                        continue;
                                                     }
                                                 }
                                                 Err(e) => warn!("[Node:{}] Invalid gossiped block (H:{} from PeerId {:?}): {}", node_name_for_loop_logging, block.height, source, e),
@@ -571,14 +671,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                         }
                                         let p2p_clone = p2p_service_for_spawn.clone();
                                         let node_name_clone_for_spawn = node_name_for_loop_logging.clone();
-                                        // Drop guard before await
                                         drop(current_sync_state_guard);
                                         tokio::spawn(async move {
                                             if let Err(e) = p2p_clone.publish(AuroraTopic::Consensus, response_msg).await {
                                                 error!("[Node:{}] Failed to publish BlockResponse/NoBlocks: {}", node_name_clone_for_spawn, e);
                                             }
                                         });
-                                        continue; // Avoid re-locking and dropping guard again
+                                        continue;
                                     }
                                     Err(e) => {
                                         error!("[Node:{}] Error reading blocks from file for request from {}: {}", node_name_for_loop_logging, requesting_peer_id, e);
@@ -597,14 +696,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     
                                     let mut local_consensus_state_lock = consensus_state_arc.lock().await;
 
-                                    if from_height < next_expected_batch_start_height && from_height == local_consensus_state_lock.current_height + 1 {
-                                        warn!("[Node:{}:Sync] Received batch starting at H:{} (older than expected H:{}, but fits current H:{}). Attempting to apply this unexpected but useful batch.",
-                                            node_name_for_loop_logging, from_height, next_expected_batch_start_height, local_consensus_state_lock.current_height);
-                                    } else if from_height != next_expected_batch_start_height {
-                                        warn!("[Node:{}:Sync] Received batch starting at H:{} but expected H:{}. Current node H:{}. Ignoring this batch and resetting sync.",
+                                    let is_batch_sequentially_applicable =
+                                        (from_height == 0 && local_consensus_state_lock.current_height == 0 && local_consensus_state_lock.last_block_hash == "GENESIS_HASH_0.0.1") ||
+                                        (from_height > 0 && from_height == local_consensus_state_lock.current_height + 1) ;
+
+                                    if from_height != next_expected_batch_start_height && !is_batch_sequentially_applicable {
+                                        warn!("[Node:{}:Sync] Received batch starting at H:{} but expected H:{} and it's not sequentially applicable to current H:{}. Ignoring this batch and resetting sync.",
                                             node_name_for_loop_logging, from_height, next_expected_batch_start_height, local_consensus_state_lock.current_height);
                                         *current_sync_state_guard = NodeSyncState::Synced;
                                         continue;
+                                    }
+                                    if from_height < next_expected_batch_start_height && is_batch_sequentially_applicable {
+                                         warn!("[Node:{}:Sync] Received batch starting at H:{} (older than expected H:{}, but fits current H:{}). Attempting to apply this useful batch.",
+                                            node_name_for_loop_logging, from_height, next_expected_batch_start_height, local_consensus_state_lock.current_height);
                                     }
 
                                     let mut all_applied_successfully_in_batch = true;
@@ -613,7 +717,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     for block_bytes in blocks_data {
                                         match bincode::deserialize::<Block>(&block_bytes) {
                                             Ok(block_to_apply) => {
-                                                if block_to_apply.height == local_consensus_state_lock.current_height + 1 {
+                                                let expected_next_apply_height = if local_consensus_state_lock.current_height == 0 && local_consensus_state_lock.last_block_hash == "GENESIS_HASH_0.0.1" && block_to_apply.height == 0 {
+                                                    0
+                                                } else {
+                                                    local_consensus_state_lock.current_height + 1
+                                                };
+
+                                                if block_to_apply.height == expected_next_apply_height {
                                                     if validate_and_apply_block(&mut local_consensus_state_lock, &block_to_apply).is_ok() {
                                                         trace!("[Node:{}:Sync] Applied synced block H:{}", node_name_for_loop_logging, block_to_apply.height);
                                                         last_applied_height_this_batch = block_to_apply.height;
@@ -627,7 +737,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                     }
                                                 } else {
                                                     warn!("[Node:{}:Sync] Received out-of-order block H:{} in batch (expected H:{}). Stopping batch.",
-                                                        node_name_for_loop_logging, block_to_apply.height, local_consensus_state_lock.current_height + 1);
+                                                        node_name_for_loop_logging, block_to_apply.height, expected_next_apply_height);
                                                     all_applied_successfully_in_batch = false;
                                                     break;
                                                 }
@@ -649,7 +759,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                         *current_sync_state_guard = NodeSyncState::Synced;
                                         
                                         let mut buffered_blocks_map_guard = buffered_blocks_main_loop_clone.lock().await;
-                                        let mut next_buffered_to_apply_height = current_height_after_batch + 1;
+                                        let mut next_buffered_to_apply_height = if current_height_after_batch == 0 && highest_known_height == 0 {
+                                            0 
+                                        } else {
+                                            current_height_after_batch + 1
+                                        };
+
                                         let mut applied_from_buffer_in_sync_finish = 0;
                                         while let Some(block) = buffered_blocks_map_guard.remove(&next_buffered_to_apply_height) {
                                             let mut cs_lock_for_buffer = consensus_state_arc.lock().await;
@@ -681,7 +796,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                 last_request_time: tokio::time::Instant::now(),
                                             };
                                             if let Some(peer_to_request_from) = target_peer {
-                                                // Drop guard before await
                                                 drop(current_sync_state_guard);
                                                 send_block_request_range_to_peer(
                                                     p2p_service_for_spawn.clone(),
@@ -691,7 +805,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                     next_req_start,
                                                     highest_known_height
                                                 ).await;
-                                                continue; // Avoid dropping guard again
+                                                continue;
                                             } else {
                                                  *current_sync_state_guard = NodeSyncState::Synced;
                                             }
@@ -718,6 +832,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     } else {
                                         debug!("[Node:{}] Received NoBlocksInRange from {:?} but not relevant to current sync op. Ignoring.", node_name_for_loop_logging, source);
                                     }
+                                }
+                            }
+                            NetworkMessage::BlockAttestation { block_hash, block_height, attestor_peer_id_str, .. } => {
+                                if attestor_peer_id_str == local_peer_id_str_for_req {
+                                    trace!("[Node:{}] Ignoring own looped back attestation for H:{}", node_name_for_loop_logging, block_height);
+                                    continue;
+                                }
+                                info!("[Node:{}] Received BlockAttestation for H:{} Hash:{:.8} from {}",
+                                    node_name_for_loop_logging, block_height, block_hash, attestor_peer_id_str);
+
+                                let mut cs_lock = consensus_state_arc.lock().await;
+                                if ecliptic_concordance::process_incoming_attestation(&mut cs_lock, block_height, &block_hash, &attestor_peer_id_str) {
+                                    info!("[Node:{}] Block H:{} Hash:{:.8} is now CONFIRMED locally by attestations.",
+                                        node_name_for_loop_logging, block_height, block_hash);
+                                    locally_confirmed_blocks_cache_main_loop.lock().await.insert(block_hash); // Cache that it's confirmed
                                 }
                             }
                             _ => {

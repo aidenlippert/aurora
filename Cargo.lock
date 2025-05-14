@@ -778,10 +778,9 @@ checksum = "d6add3b8cff394282be81f3fc1a0605db594ed69890078ca6e2cab1c408bcf04"
 name = "ecliptic_concordance"
 version = "0.1.0"
 dependencies = [
- "once_cell",
+ "log",
  "serde",
  "uuid",
- "voidproof_engine_zkp",
 ]
 
 [[package]]
