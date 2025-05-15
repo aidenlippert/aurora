@@ -2,24 +2,29 @@
 
 use ecliptic_concordance::{
     ConsensusState as NodeLocalConsensusState,
-    sequencer_create_block, submit_transaction_payload, validate_and_apply_block,
-    Block, TransactionPayload,
+    sequencer_create_block, submit_aurora_transaction, validate_and_apply_block,
+    create_attestation, process_incoming_attestation,
+    Block, AuroraTransaction, TransferAucPayload,
 };
 use triad_web::{
     NetworkMessage, AppP2PEvent, P2PService,
-    initialize_p2p_service, message_summary,
+    initialize_p2p_service, 
     network_behaviour::AuroraTopic,
 };
+use novavault_flux_finance::{process_public_auc_transfer, get_account_balance as novavault_get_balance, ensure_account_exists_with_initial_funds};
+use aethercore_runtime::ExecutionRequest as AetherExecutionRequest; // For the struct
+use wasmi::Value as WasmiValue; // Use wasmi::Value directly
 
 use serde::{Deserialize, Serialize};
 use serde_json;
+use serde_json::json;
 use clap::Parser;
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, read_to_string as fs_read_to_string, write as fs_write};
 use std::io::{self, BufRead, Write, BufReader as StdBufReader};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::sync::Arc;
-use std::collections::{HashMap, HashSet}; // Added HashSet for confirmed_blocks_cache
+use std::collections::{HashMap, HashSet};
 
 use tokio::sync::Mutex as TokioMutex;
 use tokio::net::TcpListener;
@@ -28,25 +33,68 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 use libp2p::{Multiaddr, PeerId};
 use log::{info, warn, error, debug, trace};
 
+use ed25519_dalek::{SigningKey, SecretKey as DalekSecretKey};
+use rand::rngs::OsRng;
+use hex;
+use std::error::Error as StdError;
+use once_cell::sync::Lazy;
+use wasmi::core::F32 as WasmiF32; 
+
+
 const SEQUENCER_ID_PREFIX: &str = "sequencer-";
 const MAX_BLOCKS_PER_BATCH_RESPONSE: u32 = 20;
 const MAX_BLOCKS_TO_REQUEST_IN_SYNC: u32 = 50;
 const SYNC_RETRY_TIMEOUT_SECS: u64 = 30;
 const SYNC_STUCK_THRESHOLD_SECS: u64 = SYNC_RETRY_TIMEOUT_SECS * 2 / 3;
+const NODE_APP_KEY_FILENAME: &str = "app_signing_key.skhex";
 
-// --- Configuration for Mock Validators ---
-// !!! IMPORTANT: REPLACE THESE WITH THE ACTUAL PEER IDS OF YOUR VALIDATOR NODES !!!
-// These PeerIDs are obtained by running validator-node2 and validator-node3 once
-// with fresh (or their persistent) node_key.pk8 files and noting their logged PeerID.
-const MOCK_VALIDATOR_PEER_IDS: [&str; 2] = [
-    "12D3KooWBHQ3zJtx53NboGRHz3jbsECd8TxV3BguWpvvdbFVdBue", // Example: validator-node2's actual PeerID string
-    "12D3KooWML8EPttkYasdVJPRzfrXha2VTiENAiJ4U4DnhiSLqzGS", // Example: validator-node3's actual PeerID string
+const MOCK_VALIDATOR_APP_PUBKEYS_HEX: [&str; 2] = [
+    "16b3295223e05522224d752825606001212ad2269eb169e5f6c3b57d767ed29b", 
+    "b46946e89c9e07bd52768d231cd77013da4b9bcf727843a71455bd478c3db1bb", 
 ];
-// If ATTESTATION_THRESHOLD is 1, one validator attesting is enough.
-// If ATTESTATION_THRESHOLD is 2, both validators must attest.
-const ATTESTATION_THRESHOLD: usize = 1; 
-// --- End Configuration ---
+const ATTESTATION_THRESHOLD: usize = 1;
 
+static TEMP_NONCE_TRACKER: Lazy<TokioMutex<HashMap<String, u64>>> = Lazy::new(|| TokioMutex::new(HashMap::new()));
+
+
+fn load_or_generate_app_signing_key(key_path: &Path) -> Result<SigningKey, Box<dyn StdError + Send + Sync>> {
+    if key_path.exists() {
+        let sk_hex = fs_read_to_string(key_path)
+            .map_err(|e| Box::new(e) as Box<dyn StdError + Send + Sync>)?;
+        let sk_seed_bytes = hex::decode(sk_hex.trim())
+            .map_err(|e| Box::new(e) as Box<dyn StdError + Send + Sync>)?;
+        
+        if sk_seed_bytes.len() != ed25519_dalek::SECRET_KEY_LENGTH {
+            let err_msg = format!(
+                "Invalid secret key seed length from {:?}: Expected {}, Got {}",
+                key_path, ed25519_dalek::SECRET_KEY_LENGTH, sk_seed_bytes.len()
+            );
+            return Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, err_msg)) as Box<dyn StdError + Send + Sync>);
+        }
+        
+        let mut seed_array = [0u8; ed25519_dalek::SECRET_KEY_LENGTH];
+        seed_array.copy_from_slice(&sk_seed_bytes);
+        let dalek_secret_key = DalekSecretKey::from(seed_array);
+        let signing_key = SigningKey::from(&dalek_secret_key);
+
+        info!("[KeyMgmt] Loaded Ed25519 app signing key from {:?}", key_path);
+        Ok(signing_key)
+    } else {
+        let mut csprng = OsRng;
+        let signing_key = SigningKey::generate(&mut csprng);
+        let sk_seed_bytes = signing_key.as_bytes();
+        let sk_hex_to_save = hex::encode(sk_seed_bytes);
+        
+        if let Some(parent_dir) = key_path.parent() {
+            std::fs::create_dir_all(parent_dir)
+                .map_err(|e| Box::new(e) as Box<dyn StdError + Send + Sync>)?;
+        }
+        fs_write(key_path, sk_hex_to_save)
+            .map_err(|e| Box::new(e) as Box<dyn StdError + Send + Sync>)?;
+        info!("[KeyMgmt] Generated and saved new Ed25519 app signing key to {:?}", key_path);
+        Ok(signing_key)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NodeSyncState {
@@ -62,65 +110,57 @@ enum NodeSyncState {
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    #[clap(long, help = "Unique Node ID (for logging, libp2p generates its own PeerId)")]
+    #[clap(long, help = "Unique Node ID")]
     node_name: String,
-    #[clap(long, value_delimiter = ',', help = "Comma-separated listen multiaddresses, e.g., /ip4/0.0.0.0/tcp/8001")]
+    #[clap(long, value_delimiter = ',', help = "Libp2p listen multiaddresses")]
     listen_addrs: String,
-    #[clap(long, value_delimiter = ',', help = "Comma-separated bootstrap peer multiaddresses")]
+    #[clap(long, value_delimiter = ',', help = "Libp2p bootstrap peer multiaddresses")]
     bootstrap_peers: Option<String>,
-    #[clap(long, help = "Path to the data directory for this node (used for blockchain and node key)")]
+    #[clap(long, help = "Data directory path")]
     data_dir: PathBuf,
 }
 
-fn load_consensus_state_from_disk(node_name: &str, blockchain_file_path: &Path) -> NodeLocalConsensusState {
-    let mut state = NodeLocalConsensusState::new(node_name.to_string());
-    state.set_validators(
-        MOCK_VALIDATOR_PEER_IDS.iter().map(|s| s.to_string()).collect(),
-        ATTESTATION_THRESHOLD
-    );
+fn load_consensus_state_from_disk(node_log_id: &str, blockchain_file_path: &Path) -> NodeLocalConsensusState {
+    let mut state = NodeLocalConsensusState::new(node_log_id.to_string());
+    let validator_app_pk_hexes_set: HashSet<String> = MOCK_VALIDATOR_APP_PUBKEYS_HEX.iter().map(|s| s.to_string()).collect();
+    state.set_validators(validator_app_pk_hexes_set, ATTESTATION_THRESHOLD);
 
     if blockchain_file_path.exists() {
         if let Ok(file) = File::open(blockchain_file_path) {
             let reader = StdBufReader::new(file);
-            let mut genesis_block_processed_from_file = false;
-
             for line in reader.lines() {
                 if let Ok(line_content) = line {
                     if !line_content.trim().is_empty() {
-                        if let Ok(mut block) = serde_json::from_str::<Block>(&line_content) {
-                            if block.height == 0 && state.current_height == 0 && state.last_block_hash == "GENESIS_HASH_0.0.1" && !genesis_block_processed_from_file {
-                                state.current_height = block.height;
-                                state.last_block_hash = block.block_hash.clone();
-                                genesis_block_processed_from_file = true;
-                                trace!("[Node:{}] Loaded genesis block H:0 from file.", node_name);
-                                // Mark as confirmed if it meets criteria (e.g. genesis or already has flag)
-                                if block.height == 0 || state.block_attestations.get(&block.block_hash).map_or(false, |a| a.len() >= state.attestation_threshold) {
-                                    // For simplicity, we won't try to update the Block struct's field from here during load.
-                                    // The block_attestations map will be the source of truth for confirmation status of loaded blocks.
+                        if let Ok(block) = serde_json::from_str::<Block>(&line_content) {
+                            if block.height >= state.current_height || (block.height == 0 && state.current_height == 0 && state.last_block_hash == "GENESIS_HASH_0.0.1") {
+                                if (block.height == 0 && block.prev_block_hash == "GENESIS_HASH_0.0.1") || (block.height > 0 && block.prev_block_hash == state.last_block_hash) {
+                                   state.current_height = block.height;
+                                   state.last_block_hash = block.block_hash.clone();
+                                   for tx_wrapper in &block.transactions {
+                                       if let AuroraTransaction::TransferAUC(transfer_payload) = &tx_wrapper.payload {
+                                           if let Err(e) = process_public_auc_transfer(transfer_payload, block.height) {
+                                               error!("[Node:{}] Error re-applying loaded TransferAUC tx {} from block H:{}: {}", node_log_id, tx_wrapper.id, block.height, e);
+                                           }
+                                       }
+                                   }
+                                } else if block.height > state.current_height {
+                                    warn!("[Node:{}] Discontinuity loading chain. Jumping to H:{}. Local NovaVault state may be inconsistent until full resync.", node_log_id, block.height);
+                                    state.current_height = block.height;
+                                    state.last_block_hash = block.block_hash.clone();
                                 }
-                            } else if block.height == state.current_height + 1 && block.prev_block_hash == state.last_block_hash {
-                                state.current_height = block.height;
-                                state.last_block_hash = block.block_hash.clone();
-                            } else if block.height > state.current_height + 1 {
-                                warn!("[Node:{}] Discontinuity in blockchain file. Current H:{}, Block H:{}. Attempting to jump.",
-                                       node_name, state.current_height, block.height);
-                                state.current_height = block.height;
-                                state.last_block_hash = block.block_hash.clone();
-                            } else if block.height <= state.current_height && !(block.height == 0 && genesis_block_processed_from_file) {
-                                trace!("[Node:{}] Found older or duplicate block H:{} in chain file during load, skipping.", node_name, block.height);
                             }
                         } else {
-                             error!("[Node:{}] Failed to parse block from chain file line: '{}'", node_name, line_content);
+                             error!("[Node:{}] Failed to parse block from chain file line: '{}'", node_log_id, line_content);
                         }
                     }
                 }
             }
-            info!("[Node:{}] Restored consensus: Height {}, LastHash {}", node_name, state.current_height, state.last_block_hash);
+            info!("[Node:{}] Restored consensus: Height {}, LastHash {:.8}", node_log_id, state.current_height, state.last_block_hash);
         } else {
-            warn!("[Node:{}] Could not open blockchain file {:?}, starting from genesis.", node_name, blockchain_file_path);
+            warn!("[Node:{}] Could not open blockchain file {:?}. Starting from genesis.", node_log_id, blockchain_file_path);
         }
     } else {
-        info!("[Node:{}] No blockchain file found at {:?}, starting from genesis.", node_name, blockchain_file_path);
+        info!("[Node:{}] No blockchain file found at {:?}. Starting from genesis.", node_log_id, blockchain_file_path);
     }
     state
 }
@@ -131,13 +171,10 @@ fn read_blocks_from_file(
     max_count: u32,
 ) -> Result<Vec<Block>, io::Error> {
     let mut blocks = Vec::new();
-    if !blockchain_file_path.exists() {
-        return Ok(blocks);
-    }
+    if !blockchain_file_path.exists() { return Ok(blocks); }
     let file = File::open(blockchain_file_path)?;
     let reader = StdBufReader::new(file);
     let mut count = 0;
-
     for line_result in reader.lines() {
         let line = line_result?;
         if line.trim().is_empty() { continue; }
@@ -146,14 +183,10 @@ fn read_blocks_from_file(
                 if block.height >= start_height {
                     blocks.push(block);
                     count += 1;
-                    if count >= max_count {
-                        break;
-                    }
+                    if count >= max_count { break; }
                 }
             }
-            Err(e) => {
-                error!("Failed to parse block from chain file during read_blocks_from_file: {}", e);
-            }
+            Err(e) => { error!("Failed to parse block from file: {}", e); }
         }
     }
     Ok(blocks)
@@ -161,313 +194,230 @@ fn read_blocks_from_file(
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NodeStateSummary {
-    node_id: String,
-    name: String,
-    height: u64,
+    node_name: String,
+    libp2p_peer_id: String,
+    app_layer_pk_hex: String,
+    current_height: u64,
     last_block_hash: String,
     sync_state: String,
+    is_sequencer: bool,
+    known_validators_count: usize,
+    attestation_threshold: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct RpcRequest {
-    id: String,
-    method: String,
-    params: serde_json::Value,
-}
-
+struct RpcRequest { id: String, method: String, params: serde_json::Value }
 #[derive(Serialize, Deserialize, Debug)]
-struct RpcResponse {
-    id: String,
-    result: Option<serde_json::Value>,
-    error: Option<RpcError>,
-}
-
+struct RpcResponse { id: String, result: Option<serde_json::Value>, error: Option<RpcError> }
 #[derive(Serialize, Deserialize, Debug)]
-struct RpcError {
-    code: i32,
-    message: String,
-}
+struct RpcError { code: i32, message: String }
 
 async fn send_block_request_range_to_peer(
     p2p_service_clone: Arc<impl P2PService>,
-    node_name_clone_for_spawn: String,
-    local_peer_id_str: String,
-    target_sync_peer: PeerId,
+    node_name_log_sender: String,
+    local_libp2p_peer_id_str: String,
+    target_sync_libp2p_peer: PeerId,
     start_h: u64,
     end_h: u64,
 ) {
     let sync_req_msg = NetworkMessage::BlockRequestRange {
-        start_height: start_h,
-        end_height: Some(end_h),
+        start_height: start_h, end_height: Some(end_h),
         max_blocks_to_send: Some(MAX_BLOCKS_TO_REQUEST_IN_SYNC),
-        requesting_peer_id: local_peer_id_str,
+        requesting_peer_id: local_libp2p_peer_id_str,
     };
-    info!("[Node:{}] Sending BlockRequestRange (start_h:{}, end_h(target):{}) to peer {:?}",
-          node_name_clone_for_spawn, start_h, end_h, target_sync_peer);
-
+    info!("[Node:{}] Sending BlockRequestRange (start_h:{}, target_end_h:{}) to peer {:?}",
+          node_name_log_sender, start_h, end_h, target_sync_libp2p_peer);
     if let Err(e) = p2p_service_clone.publish(AuroraTopic::Consensus, sync_req_msg).await {
-        error!("[Node:{}] Failed to publish BlockRequestRange to peer {:?}: {}", node_name_clone_for_spawn, target_sync_peer, e);
+        error!("[Node:{}] Failed to publish BlockRequestRange to peer {:?}: {}", node_name_log_sender, target_sync_libp2p_peer, e);
     }
 }
 
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
+async fn main() -> Result<(), Box<dyn StdError + Send + Sync>> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info,graviton_edge_node=debug,ecliptic_concordance=trace,triad_web=debug,novavault_flux_finance=debug")).init();
     let args = Args::parse();
     let main_loop_node_name = args.node_name.clone();
 
     if !args.data_dir.exists() { std::fs::create_dir_all(&args.data_dir)?; }
     let blockchain_file_path = args.data_dir.join(format!("{}_blockchain.jsonl", args.node_name));
+    let app_signing_key_path = args.data_dir.join(NODE_APP_KEY_FILENAME);
+
+    let app_signing_key = load_or_generate_app_signing_key(&app_signing_key_path)?;
+    let app_verifying_key_hex = hex::encode(app_signing_key.verifying_key().as_bytes());
+    info!("[Node:{}] App Layer Ed25519 PK (Hex): {}", args.node_name, app_verifying_key_hex);
 
     let is_sequencer = args.node_name.starts_with(SEQUENCER_ID_PREFIX);
-    info!("[Node:{}] Starting. Sequencer: {}. ChainFile: {:?}. DataDir: {:?}",
-        args.node_name, is_sequencer, blockchain_file_path, args.data_dir);
+    info!("[Node:{}] Starting. Sequencer: {}. ChainFile: {:?}", args.node_name, is_sequencer, blockchain_file_path);
+    
+    ensure_account_exists_with_initial_funds(&app_verifying_key_hex);
 
-    let rpc_port_str = args.listen_addrs
-        .split(',')
-        .next()
-        .and_then(|addr_str| addr_str.split('/').nth(4))
-        .unwrap_or("0");
-    let rpc_port = rpc_port_str.parse::<u16>().unwrap_or(0) + 1000;
+    let rpc_port_str = args.listen_addrs.split(',').next().and_then(|addr| addr.split('/').nth(4)).unwrap_or("0");
+    let rpc_port = rpc_port_str.parse::<u16>().unwrap_or(8000) + 10000;
     let rpc_listen_addr_str = format!("127.0.0.1:{}", rpc_port);
     info!("[Node:{}] RPC server will listen on: {}", args.node_name, rpc_listen_addr_str);
 
     let mut initial_consensus_state = load_consensus_state_from_disk(&args.node_name, &blockchain_file_path);
-    initial_consensus_state.set_validators(
-        MOCK_VALIDATOR_PEER_IDS.iter().map(|s| s.to_string()).collect(),
-        ATTESTATION_THRESHOLD
-    );
+    let validator_app_pk_hexes: HashSet<String> = MOCK_VALIDATOR_APP_PUBKEYS_HEX.iter().map(|s| s.to_string()).collect();
+    initial_consensus_state.set_validators(validator_app_pk_hexes, ATTESTATION_THRESHOLD);
     let consensus_state_arc = Arc::new(TokioMutex::new(initial_consensus_state));
 
     let current_sync_state_arc = Arc::new(TokioMutex::new(NodeSyncState::Synced));
     let buffered_future_blocks_arc = Arc::new(TokioMutex::new(HashMap::<u64, Block>::new()));
-    // Cache of locally confirmed block hashes by this node (through receiving attestations)
     let locally_confirmed_blocks_cache_arc = Arc::new(TokioMutex::new(HashSet::<String>::new()));
 
-
-    let listen_multiaddrs: Vec<Multiaddr> = args.listen_addrs.split(',')
-        .filter_map(|s| s.trim().parse().ok())
-        .collect();
-    if listen_multiaddrs.is_empty() {
-        error!("[Node:{}] No valid listen multiaddresses provided. Exiting.", args.node_name);
-        return Err("No listen addresses".into());
-    }
-
-    let bootstrap_peers: Vec<Multiaddr> = args.bootstrap_peers.map_or_else(Vec::new, |peers_str| {
-        peers_str.split(',')
-            .filter_map(|s| s.trim().parse().ok())
-            .collect()
-    });
+    let listen_multiaddrs: Vec<Multiaddr> = args.listen_addrs.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    if listen_multiaddrs.is_empty() { return Err("No valid libp2p listen multiaddresses".into()); }
+    let bootstrap_peers: Vec<Multiaddr> = args.bootstrap_peers.map_or_else(Vec::new, |s| s.split(',').filter_map(|p| p.trim().parse().ok()).collect());
 
     let (p2p_service, mut app_event_rx) = initialize_p2p_service(
-        args.node_name.clone(),
-        args.data_dir.clone(),
-        listen_multiaddrs,
-        bootstrap_peers
+        args.node_name.clone(), args.data_dir.join("libp2p_data"), listen_multiaddrs, bootstrap_peers
     ).await?;
-    let local_peer_id = p2p_service.get_peer_id();
-    info!("[Node:{}] P2P service initialized. Local PeerId: {}", args.node_name, local_peer_id);
+    let local_libp2p_peer_id = p2p_service.get_peer_id();
+    info!("[Node:{}] P2P service initialized. Local libp2p PeerId: {}", args.node_name, local_libp2p_peer_id);
 
-    let rpc_consensus_state_arc = consensus_state_arc.clone();
-    let rpc_p2p_service = p2p_service.clone();
-    let rpc_node_name_for_server_task = args.node_name.clone();
-    let rpc_local_peer_id_for_server_task = local_peer_id.clone();
-    let rpc_current_sync_state_arc = current_sync_state_arc.clone();
+    let rpc_cs_clone = consensus_state_arc.clone();
+    let rpc_p2p_clone = p2p_service.clone();
+    let rpc_name_clone = args.node_name.clone();
+    let rpc_libp2p_id_clone = local_libp2p_peer_id.clone();
+    let rpc_app_pk_clone = app_verifying_key_hex.clone();
+    let rpc_app_sk_clone = Arc::new(app_signing_key.clone());
+    let rpc_sync_clone = current_sync_state_arc.clone();
+    let rpc_is_sequencer = is_sequencer;
+    let rpc_consensus_state_for_height_arc = consensus_state_arc.clone();
 
     tokio::spawn(async move {
         let listener = match TcpListener::bind(&rpc_listen_addr_str).await {
-            Ok(l) => l,
-            Err(e) => {
-                error!("[Node:{}:RPC] Failed to bind RPC listener on {}: {}", rpc_node_name_for_server_task, rpc_listen_addr_str, e);
-                return;
-            }
+            Ok(l) => l, Err(e) => { error!("[RPC] Bind Err: {}", e); return; }
         };
-        info!("[Node:{}:RPC] Listening for RPC commands on {}", rpc_node_name_for_server_task, rpc_listen_addr_str);
-
+        info!("[Node:{}:RPC] Listening on {}", rpc_name_clone, rpc_listen_addr_str);
         loop {
             match listener.accept().await {
-                Ok((stream, addr)) => {
-                    let rpc_handler_consensus_state = rpc_consensus_state_arc.clone();
-                    let rpc_handler_p2p_service = rpc_p2p_service.clone();
-                    let rpc_handler_node_name_conn = rpc_node_name_for_server_task.clone();
-                    let rpc_handler_local_peer_id_conn = rpc_local_peer_id_for_server_task.clone();
-                    let rpc_handler_sync_state = rpc_current_sync_state_arc.clone();
-
-                    debug!("[Node:{}:RPC] Accepted RPC connection from: {}", rpc_handler_node_name_conn, addr);
+                Ok((stream, _addr)) => {
+                    let cs = rpc_cs_clone.clone();
+                    let p2p = rpc_p2p_clone.clone();
+                    let name = rpc_name_clone.clone();
+                    let libp2p_id = rpc_libp2p_id_clone.clone();
+                    let app_pk = rpc_app_pk_clone.clone();
+                    let app_sk = rpc_app_sk_clone.clone();
+                    let sync_s = rpc_sync_clone.clone();
+                    let cs_for_height = rpc_consensus_state_for_height_arc.clone();
                     tokio::spawn(async move {
-                        handle_rpc_connection(
-                            stream,
-                            rpc_handler_consensus_state,
-                            rpc_handler_p2p_service,
-                            rpc_handler_node_name_conn,
-                            rpc_handler_local_peer_id_conn,
-                            rpc_handler_sync_state,
-                        ).await;
+                        let current_block_height = cs_for_height.lock().await.current_height;
+                        handle_rpc_connection(stream, cs, p2p, name, libp2p_id, app_pk, app_sk, sync_s, rpc_is_sequencer, current_block_height).await;
                     });
                 }
-                Err(e) => error!("[Node:{}:RPC] Error accepting RPC connection: {}", rpc_node_name_for_server_task, e),
+                Err(e) => error!("[Node:{}:RPC] Accept Error: {}", rpc_name_clone, e),
             }
         }
     });
 
     if is_sequencer {
-        let seq_node_name = args.node_name.clone();
-        let p2p_publish_clone = p2p_service.clone();
-        let blockchain_file_path_clone = blockchain_file_path.clone();
-        let consensus_state_sequencer_arc = consensus_state_arc.clone();
-        let sync_state_sequencer_check = current_sync_state_arc.clone();
-        let locally_confirmed_blocks_cache_sequencer = locally_confirmed_blocks_cache_arc.clone();
-
+        let seq_name = args.node_name.clone();
+        let seq_p2p = p2p_service.clone();
+        let seq_bchain_path = blockchain_file_path.clone();
+        let seq_cs = consensus_state_arc.clone();
+        let seq_signing_key_param = app_signing_key.clone();
+        let seq_sync_state = current_sync_state_arc.clone();
+        let seq_confirmed_cache = locally_confirmed_blocks_cache_arc.clone();
 
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(10)).await;
-                
-                let is_synced = {
-                    let sync_state = sync_state_sequencer_check.lock().await;
-                    matches!(*sync_state, NodeSyncState::Synced)
-                };
-
-                if !is_synced {
-                    trace!("[Node:{}:Seq] Sequencer is not synced, skipping block proposal.", seq_node_name);
-                    continue;
-                }
-
-                let mut local_consensus_state = consensus_state_sequencer_arc.lock().await;
-                
-                // Sequencer waits for its last block to be confirmed (by others) before proposing a new one
-                // unless it's the very first block (height 0) or chain is just starting.
-                let last_block_hash_to_check = local_consensus_state.last_block_hash.clone();
-                let current_height_to_check = local_consensus_state.current_height;
-
-                if current_height_to_check > 0 || (current_height_to_check == 0 && last_block_hash_to_check != "GENESIS_HASH_0.0.1") { // If not at true genesis
-                    let is_last_block_confirmed = locally_confirmed_blocks_cache_sequencer.lock().await.contains(&last_block_hash_to_check);
-                    if !is_last_block_confirmed {
-                        debug!("[Node:{}:Seq] Last produced block H:{} Hash:{:.8} not yet confirmed by attestations. Waiting to propose next.", 
-                            seq_node_name, current_height_to_check, last_block_hash_to_check);
-                        continue; // Skip proposing if last block isn't confirmed
+                if !matches!(*seq_sync_state.lock().await, NodeSyncState::Synced) { continue; }
+                let mut cs_lock = seq_cs.lock().await;
+                let last_h = cs_lock.last_block_hash.clone();
+                let curr_h = cs_lock.current_height;
+                if curr_h > 0 || (curr_h == 0 && last_h != "GENESIS_HASH_0.0.1") {
+                    if !seq_confirmed_cache.lock().await.contains(&last_h) {
+                        debug!("[Node:{}:Seq] Last H:{} Hash:{:.8} not confirmed. Waiting.", seq_name, curr_h, last_h);
+                        continue;
                     }
                 }
-
-
-                match sequencer_create_block(&mut local_consensus_state, &seq_node_name) {
+                match sequencer_create_block(&mut cs_lock, &seq_signing_key_param) {
                     Ok(new_block) => {
-                        info!("[Node:{}:Seq] Created Block H:{}. Publishing...", seq_node_name, new_block.height);
-                        // The sequencer's own block is not yet "confirmed by others" when just created
-                        // It will become confirmed when it receives attestations for it.
-                        
-                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&blockchain_file_path_clone) {
-                            if writeln!(file, "{}", serde_json::to_string(&new_block).unwrap_or_default()).is_err() {
-                                error!("[Node:{}:Seq] Failed to write block to file.", seq_node_name);
-                            }
+                        info!("[Node:{}:Seq] Created Block H:{}. Publishing...", seq_name, new_block.height);
+                        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&seq_bchain_path) {
+                            let _ = writeln!(f, "{}", serde_json::to_string(&new_block).unwrap_or_default());
                         }
-                        match bincode::serialize(&new_block) {
-                            Ok(serialized_block) => {
-                                if let Err(e) = p2p_publish_clone.publish(AuroraTopic::Blocks, NetworkMessage::BlockProposal(serialized_block)).await {
-                                    warn!("[Node:{}:Seq] Failed to publish block: {}", seq_node_name, e);
-                                }
+                        if let Ok(sb) = bincode::serialize(&new_block) {
+                            if let Err(e) = seq_p2p.publish(AuroraTopic::Blocks, NetworkMessage::BlockProposal(sb)).await {
+                                warn!("[Node:{}:Seq] Publish block error: {}", seq_name, e);
                             }
-                            Err(e) => error!("[Node:{}:Seq] Error serializing block with bincode: {}", seq_node_name, e),
-                        }
+                        } else { error!("[Node:{}:Seq] Serialize block error.", seq_name); }
                     }
-                    Err(e) if e == "No pending transactions to create a block." => { /* Normal, do nothing */ }
-                    Err(e) => error!("[Node:{}:Seq] Error creating block: {}", seq_node_name, e),
+                    Err(e) if e == "No pending transactions to create a block." => {}
+                    Err(e) => error!("[Node:{}:Seq] Create block error: {}", seq_name, e),
                 }
             }
         });
     }
-
-    info!("[Node:{}] Listening for P2P application events...", main_loop_node_name);
-
-    let periodic_sync_check_p2p_service = p2p_service.clone();
-    let periodic_sync_check_node_name = main_loop_node_name.clone();
-    let periodic_sync_check_local_peer_id_str = local_peer_id.to_string();
-    let periodic_sync_check_consensus_state = consensus_state_arc.clone();
-    let periodic_sync_check_sync_state = current_sync_state_arc.clone();
-    let periodic_blockchain_file_path = blockchain_file_path.clone();
-    let periodic_buffered_blocks_arc = buffered_future_blocks_arc.clone();
+    
+    let periodic_p2p_clone = p2p_service.clone();
+    let periodic_name_clone = main_loop_node_name.clone();
+    let periodic_libp2p_id_clone = local_libp2p_peer_id.to_string();
+    let periodic_cs_clone = consensus_state_arc.clone();
+    let periodic_sync_clone = current_sync_state_arc.clone();
+    let periodic_bchain_path_clone = blockchain_file_path.clone();
+    let periodic_buffered_blocks_clone = buffered_future_blocks_arc.clone();
 
     tokio::spawn(async move {
-        loop {
+         loop {
             tokio::time::sleep(Duration::from_secs(SYNC_RETRY_TIMEOUT_SECS)).await;
-            let mut sync_state_guard = periodic_sync_check_sync_state.lock().await;
-            match *sync_state_guard {
+            let mut sync_g = periodic_sync_clone.lock().await;
+            match *sync_g {
                 NodeSyncState::AttemptingSync { target_peer, highest_known_height, next_expected_batch_start_height, last_request_time } => {
                     if last_request_time.elapsed() > Duration::from_secs(SYNC_STUCK_THRESHOLD_SECS) {
-                        warn!("[Node:{}:SyncCheck] Sync seems stuck (no response for >{}s). Current next_expected_batch_start_height: {}. Re-requesting or finding new peer.",
-                               periodic_sync_check_node_name, SYNC_STUCK_THRESHOLD_SECS, next_expected_batch_start_height);
-                        
-                        if let Some(peer_to_retry_with) = target_peer {
-                            let cs_lock = periodic_sync_check_consensus_state.lock().await;
-                            let current_cs_height = cs_lock.current_height;
-                            let current_cs_last_hash = cs_lock.last_block_hash.clone();
-                            drop(cs_lock);
-
-                            let retry_start_height = if current_cs_height == 0 && current_cs_last_hash == "GENESIS_HASH_0.0.1" {
-                                0
-                            } else {
-                                next_expected_batch_start_height
-                            };
-                            
-                            if retry_start_height <= highest_known_height {
-                                if retry_start_height > current_cs_height || (retry_start_height == 0 && current_cs_height == 0 && current_cs_last_hash == "GENESIS_HASH_0.0.1") {
-                                    drop(sync_state_guard);
-                                    send_block_request_range_to_peer(
-                                        periodic_sync_check_p2p_service.clone(),
-                                        periodic_sync_check_node_name.clone(),
-                                        periodic_sync_check_local_peer_id_str.clone(),
-                                        peer_to_retry_with,
-                                        retry_start_height,
-                                        highest_known_height
-                                    ).await;
-                                    let mut sync_state_guard_update = periodic_sync_check_sync_state.lock().await;
-                                    if let NodeSyncState::AttemptingSync { last_request_time: ref mut time_ref, .. } = *sync_state_guard_update {
-                                        *time_ref = tokio::time::Instant::now();
-                                    }
-                                } else {
-                                    info!("[Node:{}:SyncCheck] Sync stuck, but retry_start_height ({}) is not valid given current height ({}). Current state might have advanced. Resetting.",
-                                           periodic_sync_check_node_name, retry_start_height, current_cs_height);
-                                    *sync_state_guard = NodeSyncState::Synced;
-                                }
-                            } else {
-                                 info!("[Node:{}:SyncCheck] Sync stuck, but retry_start_height ({}) > highest_known_height ({}). Resetting.",
-                                       periodic_sync_check_node_name, retry_start_height, highest_known_height);
-                                 *sync_state_guard = NodeSyncState::Synced;
-                            }
-                        } else {
-                            warn!("[Node:{}:SyncCheck] Sync stuck, but no target_peer. Resetting to Synced to allow new peer discovery on next block event.", periodic_sync_check_node_name);
-                            *sync_state_guard = NodeSyncState::Synced;
-                        }
+                        if let Some(p_retry) = target_peer {
+                             let cs_l = periodic_cs_clone.lock().await;
+                             let ch = cs_l.current_height; let clh = cs_l.last_block_hash.clone(); drop(cs_l);
+                             let r_start_h = if ch == 0 && clh == "GENESIS_HASH_0.0.1" { 0 } else { next_expected_batch_start_height };
+                             if r_start_h <= highest_known_height && (r_start_h > ch || (r_start_h == 0 && ch == 0 && clh == "GENESIS_HASH_0.0.1")) {
+                                 drop(sync_g);
+                                 send_block_request_range_to_peer(periodic_p2p_clone.clone(), periodic_name_clone.clone(), periodic_libp2p_id_clone.clone(), p_retry, r_start_h, highest_known_height).await;
+                                 let mut ssg_upd = periodic_sync_clone.lock().await;
+                                 if let NodeSyncState::AttemptingSync { last_request_time: ref mut time, .. } = *ssg_upd { *time = tokio::time::Instant::now(); }
+                             } else { *sync_g = NodeSyncState::Synced; }
+                        } else { *sync_g = NodeSyncState::Synced; }
                     }
                 }
                 NodeSyncState::Synced => {
-                    let mut buffered_map_guard = periodic_buffered_blocks_arc.lock().await;
-                    if !buffered_map_guard.is_empty() {
-                        let mut cs_lock = periodic_sync_check_consensus_state.lock().await;
-                        let mut next_to_apply_height = if cs_lock.current_height == 0 && cs_lock.last_block_hash == "GENESIS_HASH_0.0.1" {
-                            0
-                        } else {
-                            cs_lock.current_height + 1
-                        };
-                        let mut applied_from_buffer_count = 0;
-                        while let Some(block) = buffered_map_guard.remove(&next_to_apply_height) {
-                            if validate_and_apply_block(&mut cs_lock, &block).is_ok() {
-                                info!("[Node:{}:SyncCheckBuffer] Applied buffered block H:{}", periodic_sync_check_node_name, block.height);
-                                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&periodic_blockchain_file_path){
-                                    let _ = writeln!(file, "{}", serde_json::to_string(&block).unwrap_or_default());
+                    let mut b_map = periodic_buffered_blocks_clone.lock().await;
+                    if !b_map.is_empty() {
+                        let mut cs_l = periodic_cs_clone.lock().await;
+                        let mut next_a_h = if cs_l.current_height == 0 && cs_l.last_block_hash == "GENESIS_HASH_0.0.1" { 0 } else { cs_l.current_height + 1 };
+                        let mut applied_count = 0;
+                        while let Some(blk_to_apply) = b_map.remove(&next_a_h) {
+                            let mut all_txs_in_block_applied_locally = true;
+                            let block_height_for_tx_apply = blk_to_apply.height; 
+                            for tx_wrapper in &blk_to_apply.transactions {
+                                if let AuroraTransaction::TransferAUC(transfer_payload) = &tx_wrapper.payload {
+                                    if let Err(e) = process_public_auc_transfer(transfer_payload, block_height_for_tx_apply) {
+                                        error!("[Node:{}:PeriodicSyncBuffer] Error applying buffered TransferAUC tx {} from block H:{}: {}. Re-inserting block.", 
+                                            periodic_name_clone, tx_wrapper.id, block_height_for_tx_apply, e);
+                                        all_txs_in_block_applied_locally = false;
+                                    }
                                 }
-                                next_to_apply_height = cs_lock.current_height + 1;
-                                applied_from_buffer_count += 1;
-                            } else {
-                                warn!("[Node:{}:SyncCheckBuffer] Failed to apply buffered block H:{}. Re-inserting.", periodic_sync_check_node_name, block.height);
-                                buffered_map_guard.insert(block.height, block);
-                                break;
+                            }
+                            if !all_txs_in_block_applied_locally { 
+                                b_map.insert(blk_to_apply.height, blk_to_apply); 
+                                break; 
+                            }
+
+                            if validate_and_apply_block(&mut cs_l, &blk_to_apply).is_ok() {
+                                info!("[Node:{}:PeriodicSyncBuffer] Applied buffered block H:{} from periodic check.", periodic_name_clone, blk_to_apply.height);
+                                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&periodic_bchain_path_clone) { 
+                                    let _ = writeln!(f, "{}", serde_json::to_string(&blk_to_apply).unwrap_or_default());
+                                }
+                                next_a_h = cs_l.current_height + 1;
+                                applied_count += 1;
+                            } else { 
+                                warn!("[Node:{}:PeriodicSyncBuffer] Failed to validate/apply buffered block H:{} from periodic check. Re-inserting.", periodic_name_clone, blk_to_apply.height);
+                                b_map.insert(blk_to_apply.height, blk_to_apply); 
+                                break; 
                             }
                         }
-                        if applied_from_buffer_count > 0 {
-                            info!("[Node:{}:SyncCheckBuffer] Applied {} blocks from buffer. New height: {}", periodic_sync_check_node_name, applied_from_buffer_count, cs_lock.current_height);
+                        if applied_count > 0 {
+                             info!("[Node:{}:PeriodicSyncBuffer] Applied {} blocks from buffer during periodic check. New height: {}", periodic_name_clone, applied_count, cs_l.current_height);
                         }
                     }
                 }
@@ -475,556 +425,417 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
-
+    info!("[Node:{}] Main event loop started.", main_loop_node_name);
     loop {
-        let node_name_for_loop_logging = main_loop_node_name.clone();
-        let p2p_service_for_spawn = p2p_service.clone();
-        let blockchain_file_path_for_handler = blockchain_file_path.clone();
-        let local_peer_id_str_for_req = local_peer_id.to_string();
-        let buffered_blocks_main_loop_clone = buffered_future_blocks_arc.clone();
-        let locally_confirmed_blocks_cache_main_loop = locally_confirmed_blocks_cache_arc.clone();
-
+        let name_log_l = main_loop_node_name.clone();
+        let p2p_l_spawn = p2p_service.clone();
+        let bchain_f_l_h = blockchain_file_path.clone();
+        let local_libp2p_id_l_req = local_libp2p_peer_id.to_string();
+        let app_sk_l_att = app_signing_key.clone();
+        let app_vk_hex_l_own_check = app_verifying_key_hex.clone();
+        let buffered_b_l_clone = buffered_future_blocks_arc.clone();
+        let confirmed_c_l = locally_confirmed_blocks_cache_arc.clone();
 
         tokio::select! {
             Some(app_event) = app_event_rx.recv() => {
-                let mut current_sync_state_guard = current_sync_state_arc.lock().await;
-
+                let mut sync_g_main = current_sync_state_arc.lock().await;
                 match app_event {
-                    AppP2PEvent::GossipsubMessage { source, topic_hash: _, message } => {
-                        trace!("[Node:{}] Received Gossip from PeerId {:?}: {}", node_name_for_loop_logging, source, message_summary(&message));
+                    AppP2PEvent::GossipsubMessage { source, message, .. } => {
                         match message {
-                            NetworkMessage::BlockProposal(serialized_block) => {
-                                match bincode::deserialize::<Block>(&serialized_block) {
-                                    Ok(block) => {
-                                        if block.proposer_id == node_name_for_loop_logging { continue; }
+                            NetworkMessage::BlockProposal(ser_blk) => {
+                                match bincode::deserialize::<Block>(&ser_blk) {
+                                    Ok(blk) => {
+                                        if blk.proposer_pk_hex() == app_vk_hex_l_own_check { continue; }
+                                        let mut cs_l = consensus_state_arc.lock().await;
+                                        let ch = cs_l.current_height; 
+                                        let clh = cs_l.last_block_hash.clone();
 
-                                        let mut local_consensus_state_lock = consensus_state_arc.lock().await;
-                                        let current_node_height = local_consensus_state_lock.current_height;
-                                        let current_last_hash = local_consensus_state_lock.last_block_hash.clone();
+                                        let is_next_sequential_if_at_genesis = blk.height == 0 && ch == 0 && clh == "GENESIS_HASH_0.0.1";
+                                        let is_next_sequential_after_genesis = blk.height == ch + 1 && ch >= 0 && clh != "GENESIS_HASH_0.0.1";
 
-                                        let is_block_advanced = block.height > current_node_height + 1 ||
-                                                                (block.height == 0 && !(current_node_height == 0 && current_last_hash == "GENESIS_HASH_0.0.1"));
-
-                                        if is_block_advanced {
-                                            debug!("[Node:{}] Received advanced block H:{} from {:?} (current H:{}). Buffering.",
-                                                node_name_for_loop_logging, block.height, source, current_node_height);
-                                            buffered_blocks_main_loop_clone.lock().await.insert(block.height, block.clone());
-
-                                            let mut should_initiate_new_sync_cycle = false;
-                                            let mut new_target_peer_for_cycle = source;
-                                            let mut new_highest_known_for_cycle = block.height;
-
-                                            match *current_sync_state_guard {
-                                                NodeSyncState::Synced => {
-                                                    info!("[Node:{}] Synced (current H:{}, last_hash:{:.8}), but saw advanced block H:{}. Initiating sync.",
-                                                          node_name_for_loop_logging, current_node_height, current_last_hash, block.height);
-                                                    should_initiate_new_sync_cycle = true;
-                                                }
-                                                NodeSyncState::AttemptingSync { target_peer: Some(current_target_p), highest_known_height: current_highest, last_request_time, .. } => {
-                                                    if block.height > current_highest {
-                                                        if let NodeSyncState::AttemptingSync { ref mut highest_known_height, ..} = *current_sync_state_guard {
-                                                            *highest_known_height = block.height;
-                                                             debug!("[Node:{}] Sync in progress with {:?}. Updated target_height to {} due to new block from {:?}.",
-                                                                   node_name_for_loop_logging, current_target_p, block.height, source);
-                                                        }
-                                                        new_highest_known_for_cycle = block.height;
-                                                    } else {
-                                                        new_highest_known_for_cycle = current_highest;
+                                        if matches!(*sync_g_main, NodeSyncState::Synced) && (is_next_sequential_if_at_genesis || is_next_sequential_after_genesis) {
+                                            let mut all_txs_applied_locally = true;
+                                            let block_height_for_apply = blk.height; 
+                                            for tx_wrapper in &blk.transactions {
+                                                if let AuroraTransaction::TransferAUC(transfer_payload) = &tx_wrapper.payload {
+                                                    if let Err(e) = process_public_auc_transfer(transfer_payload, block_height_for_apply) {
+                                                        warn!("[Node:{}] Failed to process TransferAUC tx {} from received block H:{}: {}. Invalidating block.", 
+                                                            name_log_l, tx_wrapper.id, block_height_for_apply, e);
+                                                        all_txs_applied_locally = false;
+                                                        break; 
                                                     }
-
-                                                    if source != current_target_p && block.height > current_highest {
-                                                        info!("[Node:{}] Switching sync target from {:?} to {:?} due to significantly newer block H:{}.",
-                                                              node_name_for_loop_logging, current_target_p, source, block.height);
-                                                        should_initiate_new_sync_cycle = true;
-                                                    } else if last_request_time.elapsed() > Duration::from_secs(SYNC_STUCK_THRESHOLD_SECS) {
-                                                        info!("[Node:{}] Current sync target {:?} seems stuck (elapsed {:?}). Re-initiating sync cycle, possibly with same peer for new height {}.",
-                                                              node_name_for_loop_logging, current_target_p, last_request_time.elapsed(), new_highest_known_for_cycle);
-                                                        should_initiate_new_sync_cycle = true;
-                                                        new_target_peer_for_cycle = current_target_p;
-                                                    } else {
-                                                        trace!("[Node:{}] Already syncing with {:?}. New block from {:?} (H:{}) noted. Current highest target is {}.",
-                                                               node_name_for_loop_logging, current_target_p, source, block.height, new_highest_known_for_cycle);
-                                                    }
-                                                }
-                                                NodeSyncState::AttemptingSync { target_peer: None, .. } => {
-                                                    info!("[Node:{}] Was AttemptingSync but no target_peer. Initiating sync with {:?}.", node_name_for_loop_logging, source);
-                                                    should_initiate_new_sync_cycle = true;
                                                 }
                                             }
 
-                                            if should_initiate_new_sync_cycle {
-                                                let next_expected_sync_start = if current_node_height == 0 && current_last_hash == "GENESIS_HASH_0.0.1" {
-                                                    0
-                                                } else {
-                                                    current_node_height + 1
-                                                };
-
-                                                if next_expected_sync_start <= new_highest_known_for_cycle {
-                                                    info!("[Node:{}] Setting new sync cycle: TargetPeer:{:?}, HighestKnown:{}, NextExpectedBatchStart:{}",
-                                                        node_name_for_loop_logging, new_target_peer_for_cycle, new_highest_known_for_cycle, next_expected_sync_start);
-                                                    *current_sync_state_guard = NodeSyncState::AttemptingSync {
-                                                        target_peer: Some(new_target_peer_for_cycle),
-                                                        highest_known_height: new_highest_known_for_cycle,
-                                                        next_expected_batch_start_height: next_expected_sync_start,
-                                                        last_request_time: tokio::time::Instant::now(),
-                                                    };
-                                                    drop(local_consensus_state_lock);
-
-                                                    send_block_request_range_to_peer(
-                                                        p2p_service_for_spawn.clone(),
-                                                        node_name_for_loop_logging.clone(),
-                                                        local_peer_id_str_for_req.clone(),
-                                                        new_target_peer_for_cycle,
-                                                        next_expected_sync_start,
-                                                        new_highest_known_for_cycle
-                                                    ).await;
+                                            if all_txs_applied_locally && validate_and_apply_block(&mut cs_l, &blk).is_ok() {
+                                                info!("[Node:{}] Applied gossiped Block H:{} from PK:{:.8} (tx count: {})", name_log_l, blk.height, blk.proposer_pk_hex(), blk.transactions.len());
+                                                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&bchain_f_l_h) { let _ = writeln!(f, "{}", serde_json::to_string(&blk).unwrap_or_default()); }
+                                                if !is_sequencer {
+                                                    match create_attestation(blk.height, &blk.block_hash, &app_sk_l_att) {
+                                                        Ok(att) => {
+                                                            let att_m = NetworkMessage::BlockAttestation(att);
+                                                            let p2p_att_c = p2p_l_spawn.clone(); let name_att_c = name_log_l.clone();
+                                                            drop(cs_l); drop(sync_g_main);
+                                                            tokio::spawn(async move { if let Err(e) = p2p_att_c.publish(AuroraTopic::Attestations, att_m).await {error!("[{}] Pub Att Err: {}", name_att_c,e);}});
+                                                            continue;
+                                                        }
+                                                        Err(e) => error!("[Node:{}] Create Att Err: {}", name_log_l, e),
+                                                    }
+                                                }
+                                            } else { 
+                                                if !all_txs_applied_locally {} else {
+                                                    warn!("[Node:{}] Invalid gossiped block H:{} (expected sequential) from PK:{:.8} after local tx processing.", name_log_l, blk.height, blk.proposer_pk_hex()); 
+                                                }
+                                            }
+                                        } else { 
+                                            debug!("[Node:{}] Received non-sequential or out-of-sync block H:{} from PK:{:.8} (Current H:{}, SyncState:{:?}). Buffering/Triggering Sync.", 
+                                                name_log_l, blk.height, blk.proposer_pk_hex(), ch, *sync_g_main);
+                                            buffered_b_l_clone.lock().await.insert(blk.height, blk.clone());
+                                            let mut initiate_sync = false; let mut new_target_p = source; let mut new_highest_h = blk.height;
+                                            match *sync_g_main {
+                                                NodeSyncState::Synced => { initiate_sync = true; }
+                                                NodeSyncState::AttemptingSync { target_peer: Some(curr_p), highest_known_height: curr_h, last_request_time, ..} => {
+                                                    if blk.height > curr_h { new_highest_h = blk.height; debug!("[Node:{}] Sync in progress. Updated target_H to {} due to new block from {:?}.", name_log_l, blk.height, source); } 
+                                                    else { new_highest_h = curr_h; }
+                                                    if (source != curr_p && blk.height > curr_h) || last_request_time.elapsed() > Duration::from_secs(SYNC_STUCK_THRESHOLD_SECS) {
+                                                        initiate_sync = true;
+                                                        if source == curr_p || blk.height <= curr_h { new_target_p = curr_p; } else { new_target_p = source; }
+                                                    }
+                                                }
+                                                NodeSyncState::AttemptingSync { ..} => { initiate_sync = true; }
+                                            }
+                                            if initiate_sync {
+                                                let next_ssh = if ch == 0 && clh == "GENESIS_HASH_0.0.1" { 0 } else { ch + 1 };
+                                                if next_ssh <= new_highest_h { 
+                                                    info!("[Node:{}] Initiating sync: TargetPeer:{:?}, FromH:{}, ToH:{}", name_log_l, new_target_p, next_ssh, new_highest_h);
+                                                    *sync_g_main = NodeSyncState::AttemptingSync { target_peer: Some(new_target_p), highest_known_height: new_highest_h, next_expected_batch_start_height: next_ssh, last_request_time: tokio::time::Instant::now() };
+                                                    drop(cs_l); drop(sync_g_main);
+                                                    send_block_request_range_to_peer(p2p_l_spawn.clone(), name_log_l.clone(), local_libp2p_id_l_req.clone(), new_target_p, next_ssh, new_highest_h).await;
                                                     continue;
-                                                } else {
-                                                    debug!("[Node:{}] Advanced block seen (H:{}), but no range to request (current H:{}, next_expected_sync_start:{}). Relying on gossip/buffer.",
-                                                           node_name_for_loop_logging, block.height, current_node_height, next_expected_sync_start);
-                                                }
+                                                } else { debug!("[Node:{}] Block H:{} buffered. No sync range.", name_log_l, blk.height); }
                                             }
-                                        } else if matches!(*current_sync_state_guard, NodeSyncState::Synced) &&
-                                                  ( (block.height == current_node_height + 1) || (block.height == 0 && current_node_height == 0 && current_last_hash == "GENESIS_HASH_0.0.1") )
-                                        {
-                                            match validate_and_apply_block(&mut local_consensus_state_lock, &block) {
-                                                Ok(()) => {
-                                                    info!("[Node:{}] Applied gossiped Block H:{} from {} (PeerId: {:?})", node_name_for_loop_logging, block.height, block.proposer_id, source);
-                                                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&blockchain_file_path_for_handler){
-                                                        if writeln!(file, "{}", serde_json::to_string(&block).unwrap_or_default()).is_err(){
-                                                            error!("[Node:{}] Failed to write applied gossiped block H:{} to file", node_name_for_loop_logging, block.height);
-                                                        }
-                                                    }
-                                                    if !is_sequencer {
-                                                        info!("[Node:{}] Non-sequencer applied block H:{}, preparing attestation.", node_name_for_loop_logging, block.height);
-                                                        let attestation_msg = NetworkMessage::BlockAttestation {
-                                                            block_hash: block.block_hash.clone(),
-                                                            block_height: block.height,
-                                                            attestor_peer_id_str: local_peer_id_str_for_req.clone(),
-                                                        };
-                                                        let p2p_clone_for_attestation = p2p_service_for_spawn.clone();
-                                                        let node_name_for_attestation = node_name_for_loop_logging.clone();
-                                                        drop(local_consensus_state_lock);
-                                                        drop(current_sync_state_guard);
-
-                                                        tokio::spawn(async move {
-                                                            if let Err(e) = p2p_clone_for_attestation.publish(AuroraTopic::Attestations, attestation_msg).await {
-                                                                error!("[Node:{}] Failed to publish block attestation: {}", node_name_for_attestation, e);
-                                                            } else {
-                                                                info!("[Node:{}] Published attestation for H:{}", node_name_for_attestation, block.height);
-                                                            }
-                                                        });
-                                                        continue;
-                                                    }
-                                                }
-                                                Err(e) => warn!("[Node:{}] Invalid gossiped block (H:{} from PeerId {:?}): {}", node_name_for_loop_logging, block.height, source, e),
-                                            }
-                                        } else {
-                                            trace!("[Node:{}] Ignoring gossiped block H:{} from {:?}. Current H:{}, SyncState: {:?}",
-                                                   node_name_for_loop_logging, block.height, source, current_node_height, *current_sync_state_guard);
                                         }
                                     }
-                                    Err(e) => error!("[Node:{}] Error deserializing block from PeerId {:?}: {}", node_name_for_loop_logging, source, e),
+                                    Err(e) => error!("[Node:{}] Deserialize Block Err from {:?}: {}", name_log_l, source, e),
                                 }
                             }
-                            NetworkMessage::Transaction(serialized_tx_payload_data) => {
-                                if !matches!(*current_sync_state_guard, NodeSyncState::Synced) {
-                                    trace!("[Node:{}] Not synced, ignoring transaction from gossip.", node_name_for_loop_logging);
-                                    continue;
-                                }
-                                match serde_json::from_slice::<TransactionPayload>(&serialized_tx_payload_data) {
-                                    Ok(tx_payload) => {
-                                        let mut local_consensus_state_lock = consensus_state_arc.lock().await;
-                                        match submit_transaction_payload(&mut local_consensus_state_lock, tx_payload.data) {
-                                            Ok(tx_id) => info!("[Node:{}] Mempooled TxID: {} from Gossip (PeerId {:?})", node_name_for_loop_logging, tx_id, source),
-                                            Err(e) => error!("[Node:{}] Error submitting Gossip payload from PeerId {:?}: {}", node_name_for_loop_logging, source, e),
-                                        }
+                            NetworkMessage::Transaction(aurora_tx) => {
+                                if !matches!(*sync_g_main, NodeSyncState::Synced) { continue; }
+                                if is_sequencer {
+                                    let mut cs_l = consensus_state_arc.lock().await;
+                                    if let Ok(ctx_id) = submit_aurora_transaction(&mut cs_l, aurora_tx.clone()) { 
+                                        info!("[Node:{}] Mempooled AuroraTx (type {:?}) via Gossip. CTxID: {}", name_log_l, aurora_tx, ctx_id); 
+                                    } else { 
+                                        error!("[Node:{}] Error submitting Gossip AuroraTx", name_log_l); 
                                     }
-                                    Err(e) => error!("[Node:{}] Error deserializing Gossip tx payload from JSON from PeerId {:?}: {}", node_name_for_loop_logging, source, e),
+                                } else {
+                                    trace!("[Node:{}] Non-sequencer received AuroraTransaction {:?} via gossip. Ignoring for mempool.", name_log_l, aurora_tx);
                                 }
                             }
-                            NetworkMessage::BlockRequestRange { start_height, end_height, max_blocks_to_send, requesting_peer_id } => {
-                                info!("[Node:{}] Received BlockRequestRange from PeerId {} (Actual Source: {:?}) for height {} to {:?}",
-                                    node_name_for_loop_logging, requesting_peer_id, source, start_height, end_height);
-
-                                let max_to_send_val = max_blocks_to_send.unwrap_or(MAX_BLOCKS_PER_BATCH_RESPONSE).min(MAX_BLOCKS_PER_BATCH_RESPONSE);
-                                match read_blocks_from_file(&blockchain_file_path_for_handler, start_height, max_to_send_val) {
-                                    Ok(found_blocks) => {
-                                        let response_msg: NetworkMessage;
-                                        if found_blocks.is_empty() {
-                                            warn!("[Node:{}] No blocks found in range for {}. Start: {}, Max: {}",
-                                                node_name_for_loop_logging, requesting_peer_id, start_height, max_to_send_val);
-                                            response_msg = NetworkMessage::NoBlocksInRange {
-                                                requested_start: start_height,
-                                                requested_end: end_height,
-                                                responder_peer_id: local_peer_id.to_string(),
-                                            };
+                            NetworkMessage::BlockRequestRange { start_height, end_height, max_blocks_to_send, requesting_peer_id: _ } => {
+                                let max_s = max_blocks_to_send.unwrap_or(MAX_BLOCKS_PER_BATCH_RESPONSE).min(MAX_BLOCKS_PER_BATCH_RESPONSE);
+                                match read_blocks_from_file(&bchain_f_l_h, start_height, max_s) {
+                                    Ok(f_blks) => {
+                                        let r_msg = if f_blks.is_empty() {
+                                            NetworkMessage::NoBlocksInRange { requested_start: start_height, requested_end: end_height, responder_peer_id: local_libp2p_id_l_req.clone() }
                                         } else {
-                                            let response_from_height = found_blocks.first().map_or(0, |b| b.height);
-                                            let response_to_height = found_blocks.last().map_or(0, |b| b.height);
-                                            info!("[Node:{}] Sending BlockResponseBatch ({} blocks, H:{} to H:{}) to {} (Actual Source: {:?})",
-                                                node_name_for_loop_logging, found_blocks.len(), response_from_height, response_to_height, requesting_peer_id, source);
-                                            let blocks_data: Vec<Vec<u8>> = found_blocks.into_iter()
-                                                .filter_map(|b| bincode::serialize(&b).ok())
-                                                .collect();
-                                            response_msg = NetworkMessage::BlockResponseBatch { blocks_data, from_height: response_from_height, to_height: response_to_height };
-                                        }
-                                        let p2p_clone = p2p_service_for_spawn.clone();
-                                        let node_name_clone_for_spawn = node_name_for_loop_logging.clone();
-                                        drop(current_sync_state_guard);
-                                        tokio::spawn(async move {
-                                            if let Err(e) = p2p_clone.publish(AuroraTopic::Consensus, response_msg).await {
-                                                error!("[Node:{}] Failed to publish BlockResponse/NoBlocks: {}", node_name_clone_for_spawn, e);
-                                            }
-                                        });
+                                            let fh = f_blks.first().map_or(0, |b|b.height); let th = f_blks.last().map_or(0, |b|b.height);
+                                            let sb_data: Vec<Vec<u8>> = f_blks.into_iter().filter_map(|b| bincode::serialize(&b).ok()).collect();
+                                            NetworkMessage::BlockResponseBatch { blocks_data: sb_data, from_height: fh, to_height: th }
+                                        };
+                                        let p2p_r_c = p2p_l_spawn.clone(); let name_r_c = name_log_l.clone();
+                                        drop(sync_g_main);
+                                        tokio::spawn(async move { if let Err(e) = p2p_r_c.publish(AuroraTopic::Consensus, r_msg).await { error!("[{}] Pub BlkResp Err: {}", name_r_c, e);}});
                                         continue;
                                     }
-                                    Err(e) => {
-                                        error!("[Node:{}] Error reading blocks from file for request from {}: {}", node_name_for_loop_logging, requesting_peer_id, e);
-                                    }
+                                    Err(e) => error!("[Node:{}] Read blocks for req error: {}", name_log_l, e),
                                 }
                             }
                             NetworkMessage::BlockResponseBatch { blocks_data, from_height, to_height } => {
-                                info!("[Node:{}] Received BlockResponseBatch from {:?} ({} blocks, H:{} to H:{})",
-                                    node_name_for_loop_logging, source, blocks_data.len(), from_height, to_height);
-
-                                if let NodeSyncState::AttemptingSync { target_peer, highest_known_height, next_expected_batch_start_height, .. } = *current_sync_state_guard {
-                                    if Some(source) != target_peer {
-                                        debug!("[Node:{}] Received BlockResponseBatch from non-target peer {:?}. Ignoring.", node_name_for_loop_logging, source);
-                                        continue;
-                                    }
+                                if let NodeSyncState::AttemptingSync { target_peer, highest_known_height, next_expected_batch_start_height, .. } = *sync_g_main {
+                                    if Some(source) != target_peer { continue; }
+                                    let mut cs_l = consensus_state_arc.lock().await;
+                                    let is_sa = (from_height == 0 && cs_l.current_height == 0 && cs_l.last_block_hash == "GENESIS_HASH_0.0.1") || (from_height > 0 && from_height == cs_l.current_height + 1);
+                                    if from_height != next_expected_batch_start_height && !is_sa { *sync_g_main = NodeSyncState::Synced; warn!("[Node:{}:Sync] Batch out of order/unexpected. Resetting.", name_log_l); continue; }
                                     
-                                    let mut local_consensus_state_lock = consensus_state_arc.lock().await;
-
-                                    let is_batch_sequentially_applicable =
-                                        (from_height == 0 && local_consensus_state_lock.current_height == 0 && local_consensus_state_lock.last_block_hash == "GENESIS_HASH_0.0.1") ||
-                                        (from_height > 0 && from_height == local_consensus_state_lock.current_height + 1) ;
-
-                                    if from_height != next_expected_batch_start_height && !is_batch_sequentially_applicable {
-                                        warn!("[Node:{}:Sync] Received batch starting at H:{} but expected H:{} and it's not sequentially applicable to current H:{}. Ignoring this batch and resetting sync.",
-                                            node_name_for_loop_logging, from_height, next_expected_batch_start_height, local_consensus_state_lock.current_height);
-                                        *current_sync_state_guard = NodeSyncState::Synced;
-                                        continue;
-                                    }
-                                    if from_height < next_expected_batch_start_height && is_batch_sequentially_applicable {
-                                         warn!("[Node:{}:Sync] Received batch starting at H:{} (older than expected H:{}, but fits current H:{}). Attempting to apply this useful batch.",
-                                            node_name_for_loop_logging, from_height, next_expected_batch_start_height, local_consensus_state_lock.current_height);
-                                    }
-
-                                    let mut all_applied_successfully_in_batch = true;
-                                    let mut last_applied_height_this_batch = local_consensus_state_lock.current_height;
-
-                                    for block_bytes in blocks_data {
-                                        match bincode::deserialize::<Block>(&block_bytes) {
-                                            Ok(block_to_apply) => {
-                                                let expected_next_apply_height = if local_consensus_state_lock.current_height == 0 && local_consensus_state_lock.last_block_hash == "GENESIS_HASH_0.0.1" && block_to_apply.height == 0 {
-                                                    0
-                                                } else {
-                                                    local_consensus_state_lock.current_height + 1
-                                                };
-
-                                                if block_to_apply.height == expected_next_apply_height {
-                                                    if validate_and_apply_block(&mut local_consensus_state_lock, &block_to_apply).is_ok() {
-                                                        trace!("[Node:{}:Sync] Applied synced block H:{}", node_name_for_loop_logging, block_to_apply.height);
-                                                        last_applied_height_this_batch = block_to_apply.height;
-                                                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&blockchain_file_path_for_handler){
-                                                            let _ = writeln!(file, "{}", serde_json::to_string(&block_to_apply).unwrap_or_default());
+                                    let mut all_ok = true; let mut last_ah = cs_l.current_height;
+                                    for bb in blocks_data {
+                                        match bincode::deserialize::<Block>(&bb) {
+                                            Ok(blk) => {
+                                                let exp_nh = if cs_l.current_height == 0 && cs_l.last_block_hash == "GENESIS_HASH_0.0.1" && blk.height == 0 {0} else {cs_l.current_height + 1};
+                                                if blk.height == exp_nh {
+                                                    let mut txs_in_synced_block_ok = true;
+                                                    let block_height_for_batch_apply = blk.height;
+                                                    for tx_wrapper_synced in &blk.transactions {
+                                                        if let AuroraTransaction::TransferAUC(transfer_payload_synced) = &tx_wrapper_synced.payload {
+                                                            if let Err(e) = process_public_auc_transfer(transfer_payload_synced, block_height_for_batch_apply) {
+                                                                error!("[Node:{}:Sync] Error applying synced TransferAUC tx {} from block H:{}: {}. Halting batch.", 
+                                                                    name_log_l, tx_wrapper_synced.id, block_height_for_batch_apply, e);
+                                                                txs_in_synced_block_ok = false;
+                                                                break;
+                                                            }
                                                         }
-                                                    } else {
-                                                        warn!("[Node:{}:Sync] Failed to validate/apply synced block H:{} from batch. Stopping batch application.", node_name_for_loop_logging, block_to_apply.height);
-                                                        all_applied_successfully_in_batch = false;
-                                                        break;
                                                     }
-                                                } else {
-                                                    warn!("[Node:{}:Sync] Received out-of-order block H:{} in batch (expected H:{}). Stopping batch.",
-                                                        node_name_for_loop_logging, block_to_apply.height, expected_next_apply_height);
-                                                    all_applied_successfully_in_batch = false;
-                                                    break;
-                                                }
-                                            }
-                                            Err(e) => {
-                                                error!("[Node:{}:Sync] Failed to deserialize block in batch: {}. Stopping batch application.", node_name_for_loop_logging, e);
-                                                all_applied_successfully_in_batch = false;
-                                                break;
-                                            }
+                                                    if !txs_in_synced_block_ok { all_ok = false; break; }
+
+                                                    if validate_and_apply_block(&mut cs_l, &blk).is_ok() {
+                                                        last_ah = blk.height;
+                                                        info!("[Node:{}:Sync] Applied synced block H:{} from batch.", name_log_l, blk.height);
+                                                        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&bchain_f_l_h) {let _ = writeln!(f, "{}", serde_json::to_string(&blk).unwrap_or_default());}
+                                                    } else { all_ok = false; warn!("[Node:{}:Sync] Failed to validate_and_apply_block H:{} from batch.", name_log_l, blk.height); break; }
+                                                } else { all_ok = false; warn!("[Node:{}:Sync] Out of order block H:{} in batch (expected H:{}).", name_log_l, blk.height, exp_nh); break; }
+                                            } Err(e) => { all_ok = false; error!("[Node:{}:Sync] Deserialize block in batch error: {}.", name_log_l, e); break; }
                                         }
                                     }
-
-                                    let current_height_after_batch = local_consensus_state_lock.current_height;
-                                    drop(local_consensus_state_lock);
-
-
-                                    if current_height_after_batch >= highest_known_height {
-                                        info!("[Node:{}] Sync complete. Reached/passed target height {}. Now Synced.", node_name_for_loop_logging, highest_known_height);
-                                        *current_sync_state_guard = NodeSyncState::Synced;
-                                        
-                                        let mut buffered_blocks_map_guard = buffered_blocks_main_loop_clone.lock().await;
-                                        let mut next_buffered_to_apply_height = if current_height_after_batch == 0 && highest_known_height == 0 {
-                                            0 
-                                        } else {
-                                            current_height_after_batch + 1
-                                        };
-
-                                        let mut applied_from_buffer_in_sync_finish = 0;
-                                        while let Some(block) = buffered_blocks_map_guard.remove(&next_buffered_to_apply_height) {
-                                            let mut cs_lock_for_buffer = consensus_state_arc.lock().await;
-                                            if validate_and_apply_block(&mut cs_lock_for_buffer, &block).is_ok() {
-                                                info!("[Node:{}:SyncFinishBuffer] Applied buffered block H:{}", node_name_for_loop_logging, block.height);
-                                                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&blockchain_file_path_for_handler){
-                                                    let _ = writeln!(file, "{}", serde_json::to_string(&block).unwrap_or_default());
+                                    let ch_after_b = cs_l.current_height; drop(cs_l);
+                                    
+                                    if ch_after_b >= highest_known_height {
+                                        *sync_g_main = NodeSyncState::Synced; info!("[Node:{}:Sync] Sync complete to H:{}.", name_log_l, ch_after_b);
+                                        let mut bm_g = buffered_b_l_clone.lock().await;
+                                        let mut next_bh = if ch_after_b == 0 && highest_known_height == 0 { 0 } else { ch_after_b + 1};
+                                        let mut applied_from_buffer_count = 0;
+                                        while let Some(blk_buf) = bm_g.remove(&next_bh) {
+                                            let mut cs_b_l = consensus_state_arc.lock().await;
+                                            let mut tx_in_buf_blk_ok = true;
+                                            let block_height_buf_apply = blk_buf.height;
+                                            for tx_wrap_buf in &blk_buf.transactions {
+                                                if let AuroraTransaction::TransferAUC(tp_buf) = &tx_wrap_buf.payload {
+                                                    if let Err(e) = process_public_auc_transfer(tp_buf, block_height_buf_apply) { error!("[{}:SyncBuf] Error applying buf TransferAUC:{}",name_log_l,e); tx_in_buf_blk_ok = false; break;}
                                                 }
-                                                next_buffered_to_apply_height = cs_lock_for_buffer.current_height + 1;
-                                                applied_from_buffer_in_sync_finish +=1;
-                                            } else {
-                                                warn!("[Node:{}:SyncFinishBuffer] Failed to apply buffered block H:{}. Re-inserting.", node_name_for_loop_logging, block.height);
-                                                buffered_blocks_map_guard.insert(block.height, block);
-                                                break;
                                             }
+                                            if !tx_in_buf_blk_ok { bm_g.insert(blk_buf.height, blk_buf); break; }
+
+                                            if validate_and_apply_block(&mut cs_b_l, &blk_buf).is_ok() {
+                                                info!("[Node:{}:SyncBuf] Applied buffered H:{}", name_log_l, blk_buf.height);
+                                                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&bchain_f_l_h) { let _ = writeln!(f, "{}", serde_json::to_string(&blk_buf).unwrap_or_default());}
+                                                next_bh = cs_b_l.current_height + 1; applied_from_buffer_count += 1;
+                                            } else { bm_g.insert(blk_buf.height, blk_buf); break;}
                                         }
-                                        if applied_from_buffer_in_sync_finish > 0 {
-                                            info!("[Node:{}:SyncFinishBuffer] Applied {} blocks from buffer.", node_name_for_loop_logging, applied_from_buffer_in_sync_finish);
-                                        }
-                                    } else if all_applied_successfully_in_batch && last_applied_height_this_batch == to_height {
-                                        let next_req_start = last_applied_height_this_batch + 1;
-                                        if next_req_start <= highest_known_height {
-                                            info!("[Node:{}:Sync] Batch H:{} to H:{} applied. Requesting next from H:{}",
-                                                  node_name_for_loop_logging, from_height, to_height, next_req_start);
-                                            *current_sync_state_guard = NodeSyncState::AttemptingSync {
-                                                target_peer,
-                                                highest_known_height,
-                                                next_expected_batch_start_height: next_req_start,
-                                                last_request_time: tokio::time::Instant::now(),
-                                            };
-                                            if let Some(peer_to_request_from) = target_peer {
-                                                drop(current_sync_state_guard);
-                                                send_block_request_range_to_peer(
-                                                    p2p_service_for_spawn.clone(),
-                                                    node_name_for_loop_logging.clone(),
-                                                    local_peer_id_str_for_req.clone(),
-                                                    peer_to_request_from,
-                                                    next_req_start,
-                                                    highest_known_height
-                                                ).await;
+                                        if applied_from_buffer_count > 0 { info!("[Node:{}:SyncBuf] Applied {} blocks from buffer post-sync.", name_log_l, applied_from_buffer_count); }
+
+                                    } else if all_ok && last_ah == to_height {
+                                        let next_rs = last_ah + 1;
+                                        if next_rs <= highest_known_height {
+                                            *sync_g_main = NodeSyncState::AttemptingSync { target_peer, highest_known_height, next_expected_batch_start_height: next_rs, last_request_time: tokio::time::Instant::now()};
+                                            if let Some(pr) = target_peer {
+                                                drop(sync_g_main);
+                                                send_block_request_range_to_peer(p2p_l_spawn.clone(), name_log_l.clone(), local_libp2p_id_l_req.clone(), pr, next_rs, highest_known_height).await;
                                                 continue;
-                                            } else {
-                                                 *current_sync_state_guard = NodeSyncState::Synced;
-                                            }
-                                        } else {
-                                             info!("[Node:{}] Applied batch up to H:{}, which meets or exceeds highest_known_height {}. Setting to Synced.", node_name_for_loop_logging, last_applied_height_this_batch, highest_known_height);
-                                             *current_sync_state_guard = NodeSyncState::Synced;
-                                        }
-                                    } else {
-                                        warn!("[Node:{}:Sync] Sync batch H:{} to H:{} from {:?} incomplete or failed. Resetting to Synced. Will retry on next advanced block.",
-                                              node_name_for_loop_logging, from_height, to_height, source);
-                                        *current_sync_state_guard = NodeSyncState::Synced;
-                                    }
-                                } else {
-                                     debug!("[Node:{}] Received BlockResponseBatch but not in AttemptingSync state or from wrong peer. SyncState: {:?}, Source: {:?}",
-                                           node_name_for_loop_logging, *current_sync_state_guard, source);
+                                            } else { *sync_g_main = NodeSyncState::Synced; }
+                                        } else { *sync_g_main = NodeSyncState::Synced; }
+                                    } else { *sync_g_main = NodeSyncState::Synced; warn!("[Node:{}:Sync] Sync batch incomplete/failed. Resetting.", name_log_l); }
                                 }
                             }
-                            NetworkMessage::NoBlocksInRange { requested_start, requested_end, responder_peer_id } => {
-                                if let NodeSyncState::AttemptingSync { target_peer: Some(sync_target_id), next_expected_batch_start_height, .. } = *current_sync_state_guard {
-                                    if source == sync_target_id && requested_start == next_expected_batch_start_height {
-                                        warn!("[Node:{}:Sync] Sync target peer {:?} (reported by {}) reported no blocks for range starting at {} to {:?}. Resetting sync state.",
-                                            node_name_for_loop_logging, source, responder_peer_id, requested_start, requested_end);
-                                        *current_sync_state_guard = NodeSyncState::Synced;
-                                    } else {
-                                        debug!("[Node:{}] Received NoBlocksInRange from {:?} but not relevant to current sync op. Ignoring.", node_name_for_loop_logging, source);
-                                    }
+                            NetworkMessage::NoBlocksInRange { .. } => {
+                                if let NodeSyncState::AttemptingSync { target_peer: Some(sti), .. } = *sync_g_main {
+                                    if source == sti { *sync_g_main = NodeSyncState::Synced; warn!("[Node:{}:Sync] Target peer reported NoBlocksInRange. Resetting.", name_log_l); }
                                 }
                             }
-                            NetworkMessage::BlockAttestation { block_hash, block_height, attestor_peer_id_str, .. } => {
-                                if attestor_peer_id_str == local_peer_id_str_for_req {
-                                    trace!("[Node:{}] Ignoring own looped back attestation for H:{}", node_name_for_loop_logging, block_height);
-                                    continue;
-                                }
-                                info!("[Node:{}] Received BlockAttestation for H:{} Hash:{:.8} from {}",
-                                    node_name_for_loop_logging, block_height, block_hash, attestor_peer_id_str);
-
-                                let mut cs_lock = consensus_state_arc.lock().await;
-                                if ecliptic_concordance::process_incoming_attestation(&mut cs_lock, block_height, &block_hash, &attestor_peer_id_str) {
-                                    info!("[Node:{}] Block H:{} Hash:{:.8} is now CONFIRMED locally by attestations.",
-                                        node_name_for_loop_logging, block_height, block_hash);
-                                    locally_confirmed_blocks_cache_main_loop.lock().await.insert(block_hash); // Cache that it's confirmed
+                            NetworkMessage::BlockAttestation(attestation) => {
+                                if attestation.attestor_pk_hex() == app_vk_hex_l_own_check { continue; }
+                                info!("[Node:{}] Received BlockAttestation for H:{} Hash:{:.8} from PK:{:.8} (via p2p peer {:?})",
+                                    name_log_l, attestation.block_height, attestation.block_hash, attestation.attestor_pk_hex(), source);
+                                let mut cs_l = consensus_state_arc.lock().await;
+                                if process_incoming_attestation(&mut cs_l, &attestation) {
+                                    confirmed_c_l.lock().await.insert(attestation.block_hash);
                                 }
                             }
-                            _ => {
-                                trace!("[Node:{}] Unhandled Gossipsub message type from {:?}.", node_name_for_loop_logging, source);
-                            }
+                             _ => { trace!("[Node:{}] Unhandled Gossipsub msg type.", name_log_l); }
                         }
                     }
-                    AppP2PEvent::DirectMessage { source, message } => {
-                         trace!("[Node:{}] Received unhandled DirectMessage from {:?}: {:?}", node_name_for_loop_logging, source, message_summary(&message));
+                    AppP2PEvent::DirectMessage { source: direct_source, message: direct_message } => {
+                        trace!("[Node:{}] Received unhandled DirectMessage from {:?}: {:?}", name_log_l, direct_source, triad_web::message_summary(&direct_message));
                     }
-                    AppP2PEvent::PeerConnected(peer_id) => {
-                        info!("[Node:{}] Peer connected: {}", node_name_for_loop_logging, peer_id);
-                    }
-                    AppP2PEvent::PeerDisconnected(peer_id) => {
-                        info!("[Node:{}] Peer disconnected: {}", node_name_for_loop_logging, peer_id);
-                        if let NodeSyncState::AttemptingSync { target_peer: Some(sync_target_id), .. } = *current_sync_state_guard {
-                            if sync_target_id == peer_id {
-                                warn!("[Node:{}:Sync] Sync target peer {:?} disconnected. Resetting sync state. Will find new peer on next trigger.",
-                                      node_name_for_loop_logging, peer_id);
-                                *current_sync_state_guard = NodeSyncState::Synced;
-                            }
+                    AppP2PEvent::PeerConnected(pid) => { info!("[Node:{}] Peer connected: {}", name_log_l, pid); }
+                    AppP2PEvent::PeerDisconnected(pid) => { 
+                        info!("[Node:{}] Peer disconnected: {}", name_log_l, pid); 
+                        if let NodeSyncState::AttemptingSync { target_peer: Some(sti), .. } = *sync_g_main {
+                            if sti == pid { *sync_g_main = NodeSyncState::Synced; warn!("[Node:{}:Sync] Sync target peer disconnected. Resetting.", name_log_l); }
                         }
                     }
                 }
             }
-            else => {
-                error!("[Node:{}] P2P application event channel closed. Shutting down.", main_loop_node_name);
-                break;
-            }
+            else => { error!("[Node:{}] P2P event channel closed.", main_loop_node_name); break; }
         }
     }
     Ok(())
 }
-
 
 async fn handle_rpc_connection(
     stream: tokio::net::TcpStream,
     consensus_state_arc: Arc<TokioMutex<NodeLocalConsensusState>>,
     p2p_service: Arc<impl P2PService>,
     node_name_handler: String,
-    local_peer_id_handler: PeerId,
+    local_libp2p_peer_id_handler: PeerId,
+    node_app_pk_hex: String, 
+    _node_app_signing_key: Arc<SigningKey>, 
     sync_state_arc: Arc<TokioMutex<NodeSyncState>>,
+    is_sequencer_rpc: bool,
+    current_block_height_for_rpc_ops: u64,
 ) {
     let (raw_reader, mut writer) = stream.into_split();
     let mut reader = TokioBufReader::new(raw_reader);
     let mut line = String::new();
 
     loop {
-        let node_name_for_this_rpc_iter = node_name_handler.clone();
-        let p2p_service_for_this_rpc_iter = p2p_service.clone();
-
         line.clear();
         match reader.read_line(&mut line).await {
-            Ok(0) => {
-                debug!("[Node:{}:RPC] Connection closed by client.", node_name_for_this_rpc_iter);
-                break;
-            }
+            Ok(0) => break,
             Ok(_) => {
-                let request_json = line.trim();
-                if request_json.is_empty() { continue; }
-
-                debug!("[Node:{}:RPC] Received RPC request: {}", node_name_for_this_rpc_iter, request_json);
-                let rpc_req: RpcRequest = match serde_json::from_str(request_json) {
-                    Ok(req) => req,
-                    Err(e) => {
-                        error!("[Node:{}:RPC] Failed to parse RPC request: {}. Raw: '{}'", node_name_for_this_rpc_iter, e, request_json);
-                        let err_resp = RpcResponse {
-                            id: "unknown".to_string(),
-                            result: None,
-                            error: Some(RpcError { code: -32700, message: "Parse error".to_string() }),
-                        };
-                        if let Ok(resp_json) = serde_json::to_string(&err_resp) {
-                            let _ = writer.write_all(format!("{}\n", resp_json).as_bytes()).await;
-                            let _ = writer.flush().await;
-                        }
-                        continue;
-                    }
-                };
-
-                let response_id_clone = rpc_req.id.clone();
-
+                let req_json = line.trim();
+                if req_json.is_empty() { continue; }
+                let rpc_req: RpcRequest = match serde_json::from_str(req_json) { Ok(r) => r, Err(e) => { 
+                    error!("[Node:{}:RPC] Parse RPC req error: {}", node_name_handler, e);
+                    let err_resp = RpcResponse { id: "unknown".to_string(), result: None, error: Some(RpcError { code: -32700, message: "Parse error".to_string() })};
+                    if let Ok(rj) = serde_json::to_string(&err_resp) { let _ = writer.write_all(format!("{}\n", rj).as_bytes()).await; let _ = writer.flush().await;}
+                    continue; 
+                }};
+                let resp_id = rpc_req.id.clone();
+                
                 let response: RpcResponse = match rpc_req.method.as_str() {
                     "submit_transaction" => {
-                        let current_sync_state_val = sync_state_arc.lock().await;
-                        if !matches!(*current_sync_state_val, NodeSyncState::Synced) {
-                            warn!("[Node:{}:RPC] Node not synced, rejecting submit_transaction. SyncState: {:?}", node_name_for_this_rpc_iter, *current_sync_state_val);
-                             RpcResponse { id: response_id_clone, result: None, error: Some(RpcError { code: -100, message: format!("Node is not synced. Current state: {:?}", *current_sync_state_val) }) }
+                        if !matches!(*sync_state_arc.lock().await, NodeSyncState::Synced) {
+                             RpcResponse {id: resp_id, result:None, error: Some(RpcError{code:-100, message:"Node not synced".into()})}
                         } else {
-                            drop(current_sync_state_val);
-                            match serde_json::from_value::<HashMap<String, String>>(rpc_req.params) {
-                                Ok(params) => {
-                                    if let Some(data_str) = params.get("data") {
-                                        let tx_data_bytes = data_str.as_bytes().to_vec();
-                                        let concord_tx_payload = TransactionPayload {data: tx_data_bytes.clone()};
-
-                                        let tx_id_result = {
-                                            let mut local_consensus_state = consensus_state_arc.lock().await;
-                                            submit_transaction_payload(&mut local_consensus_state, tx_data_bytes)
-                                        };
-
-                                        match tx_id_result {
-                                            Ok(tx_id) => {
-                                                info!("[Node:{}:RPC] Transaction submitted via RPC. TxID: {}, Gossiping...", node_name_for_this_rpc_iter, tx_id);
-                                                
-                                                let mut gossip_status = "gossip_queued".to_string();
-                                                match serde_json::to_vec(&concord_tx_payload) {
-                                                    Ok(network_tx_payload_bytes) => {
-                                                        let tx_gossip_msg = NetworkMessage::Transaction(network_tx_payload_bytes);
-                                                        let p2p_service_for_gossip = p2p_service_for_this_rpc_iter.clone();
-                                                        let node_name_for_gossip = node_name_for_this_rpc_iter.clone();
-                                                        let tx_id_for_gossip = tx_id.clone();
-                                                        
-                                                        tokio::spawn(async move {
-                                                            if let Err(e) = p2p_service_for_gossip.publish(AuroraTopic::Transactions, tx_gossip_msg).await {
-                                                                error!("[Node:{}:RPC:GossipSpawn] Failed to gossip transaction {} via P2P: {}", node_name_for_gossip, tx_id_for_gossip, e);
-                                                            } else {
-                                                                info!("[Node:{}:RPC:GossipSpawn] Successfully gossiped transaction {}", node_name_for_gossip, tx_id_for_gossip);
-                                                            }
-                                                        });
-                                                    }
-                                                    Err(e) => {
-                                                        error!("[Node:{}:RPC] Failed to serialize TransactionPayload for network, cannot gossip: {}", node_name_for_this_rpc_iter, e);
-                                                        gossip_status = "gossip_serialization_failed".to_string();
-                                                    }
-                                                };
-                                                RpcResponse {
-                                                    id: response_id_clone,
-                                                    result: Some(serde_json::json!({
-                                                        "transaction_id": tx_id,
-                                                        "gossip_status": gossip_status
-                                                    })),
-                                                    error: None
-                                                }
-                                            }
-                                            Err(e) => RpcResponse { id: response_id_clone, result: None, error: Some(RpcError { code: -1, message: format!("Consensus submission error: {}", e) }) },
-                                        }
+                            match serde_json::from_value::<TransferAucPayload>(rpc_req.params.clone()) {
+                                Ok(mut transfer_payload) => { 
+                                    if transfer_payload.sender_pk_hex.is_empty() || transfer_payload.sender_pk_hex == "self" {
+                                        transfer_payload.sender_pk_hex = node_app_pk_hex.clone();
+                                        let mut nonce_map = TEMP_NONCE_TRACKER.lock().await;
+                                        let next_nonce_val = nonce_map.entry(node_app_pk_hex.clone()).or_insert(0);
+                                        transfer_payload.nonce = *next_nonce_val;
+                                        *next_nonce_val += 1;
+                                        info!("[Node:{}:RPC] Using self as sender for TransferAUC, PK: {:.8}, Nonce: {}", 
+                                            node_name_handler, node_app_pk_hex, transfer_payload.nonce);
                                     } else {
-                                        RpcResponse { id: response_id_clone, result: None, error: Some(RpcError { code: -32602, message: "Missing 'data' param".to_string() }) }
+                                        info!("[Node:{}:RPC] TransferAUC submitted for sender: {:.8}, Nonce: {}", 
+                                            node_name_handler, transfer_payload.sender_pk_hex, transfer_payload.nonce);
+                                    }
+
+                                    match process_public_auc_transfer(&transfer_payload, current_block_height_for_rpc_ops) {
+                                        Ok(nova_vault_op_id) => {
+                                            let aurora_tx = AuroraTransaction::TransferAUC(transfer_payload.clone());
+                                            let consensus_tx_id_res = { 
+                                                let mut cs_lock = consensus_state_arc.lock().await;
+                                                submit_aurora_transaction(&mut cs_lock, aurora_tx.clone())
+                                            };
+
+                                            match consensus_tx_id_res {
+                                                Ok(ctx_id) => {
+                                                    info!("[Node:{}:RPC] TransferAUC submitted to consensus. CTxID: {}, NovaVaultOpID: {}. Gossiping...", 
+                                                        node_name_handler, ctx_id, nova_vault_op_id);
+                                                    
+                                                    let p2p_c = p2p_service.clone(); 
+                                                    let name_c = node_name_handler.clone();
+                                                    let aurora_tx_to_gossip = aurora_tx.clone();
+                                                    let ctx_id_clone_for_gossip = ctx_id.clone(); 
+                                                    tokio::spawn(async move { 
+                                                        if let Err(e) = p2p_c.publish(AuroraTopic::Transactions, NetworkMessage::Transaction(aurora_tx_to_gossip)).await {
+                                                            error!("[{}:RPC:Gossip] Failed to gossip TransferAUC CTxID {}: {}", name_c, ctx_id_clone_for_gossip, e);
+                                                        } else {
+                                                            debug!("[{}:RPC:Gossip] Gossiped TransferAUC CTxID {}", name_c, ctx_id_clone_for_gossip);
+                                                        }
+                                                    });
+                                                    RpcResponse {id: resp_id, result: Some(json!({
+                                                        "consensus_transaction_id": ctx_id,
+                                                        "novavault_operation_id": nova_vault_op_id
+                                                    })), error: None}
+                                                }
+                                                Err(e) => RpcResponse {id:resp_id, result:None, error:Some(RpcError{code:-1,message:format!("Consensus submission error: {}",e)})}
+                                            }
+                                        }
+                                        Err(e) => RpcResponse {id:resp_id, result:None, error:Some(RpcError{code:-2, message:format!("NovaVault processing error: {}",e)})}
                                     }
                                 }
-                                Err(e) => RpcResponse { id: response_id_clone, result: None, error: Some(RpcError { code: -32602, message: format!("Invalid params for submit_transaction: {}", e) }) }
+                                Err(e) => RpcResponse {id:resp_id, result:None, error:Some(RpcError{code:-32602, message:format!("Invalid params for submit_transaction (expected TransferAucPayload): {}",e)})}
+                             }
+                        }
+                    }
+                    "get_balance" => {
+                        match serde_json::from_value::<HashMap<String, String>>(rpc_req.params) {
+                            Ok(params) => {
+                                if let Some(account_pk_hex_str) = params.get("account_pk_hex") {
+                                    match novavault_get_balance(account_pk_hex_str) {
+                                        Ok(balance) => RpcResponse {id: resp_id, result: Some(json!({"account_pk_hex": account_pk_hex_str, "balance_auc": balance })), error: None},
+                                        Err(e) => RpcResponse {id:resp_id, result:None, error:Some(RpcError{code:-3, message:format!("Error getting balance: {}",e)})}
+                                    }
+                                } else { RpcResponse {id:resp_id, result:None, error:Some(RpcError{code:-32602, message:"Missing 'account_pk_hex' param for get_balance".into()})} }
                             }
+                            Err(e) => RpcResponse {id:resp_id, result:None, error:Some(RpcError{code:-32602, message:format!("Invalid params for get_balance: {}", e)})}
                         }
                     }
                     "get_node_state" => {
-                        let local_consensus_state_lock = consensus_state_arc.lock().await;
-                        let sync_state_lock = sync_state_arc.lock().await;
+                        let cs_lock = consensus_state_arc.lock().await;
+                        let sync_lock = sync_state_arc.lock().await;
                         let summary = NodeStateSummary {
-                            node_id: local_peer_id_handler.to_string(),
-                            name: node_name_handler.clone(),
-                            height: local_consensus_state_lock.current_height,
-                            last_block_hash: local_consensus_state_lock.last_block_hash.clone(),
-                            sync_state: format!("{:?}", *sync_state_lock),
+                            node_name: node_name_handler.clone(), libp2p_peer_id: local_libp2p_peer_id_handler.to_string(),
+                            app_layer_pk_hex: node_app_pk_hex.clone(), current_height: cs_lock.current_height,
+                            last_block_hash: cs_lock.last_block_hash.clone(), sync_state: format!("{:?}", *sync_lock),
+                            is_sequencer: is_sequencer_rpc, known_validators_count: cs_lock.known_validator_pk_hexes.len(),
+                            attestation_threshold: cs_lock.attestation_threshold,
                         };
-                        RpcResponse { id: response_id_clone, result: Some(serde_json::to_value(summary).unwrap()), error: None }
+                        RpcResponse {id: resp_id, result: Some(serde_json::to_value(summary).unwrap()), error: None}
                     }
-                    _ => RpcResponse { id: response_id_clone, result: None, error: Some(RpcError { code: -32601, message: "Method not found".to_string() }) },
+                    "execute_module_call" => {
+                        if !matches!(*sync_state_arc.lock().await, NodeSyncState::Synced) {
+                             RpcResponse {id: resp_id, result:None, error: Some(RpcError{code:-100, message:"Node not synced".into()})}
+                        } else {
+                            let params_val = rpc_req.params.clone();
+                            let module_id = params_val.get("module_id").and_then(|v| v.as_str()).map(String::from);
+                            let function_name = params_val.get("function_name").and_then(|v| v.as_str()).map(String::from);
+                            let gas_limit = params_val.get("gas_limit").and_then(|v| v.as_u64()).unwrap_or(1_000_000); 
+                            let originator_did_from_rpc = params_val.get("originator_did").and_then(|v| v.as_str()).map(String::from);
+
+                            let wasm_args_res: Result<Vec<WasmiValue>, String> = params_val.get("args_json") // Use WasmiValue
+                                .ok_or_else(|| "Missing 'args_json'".to_string())
+                                .and_then(|json_val| serde_json::from_value::<Vec<serde_json::Number>>(json_val.clone()) 
+                                    .map_err(|e| format!("Failed to parse args_json as numbers: {}", e))
+                                    .map(|numbers| numbers.into_iter().map(|n| if n.is_i64() { WasmiValue::I32(n.as_i64().unwrap_or(0) as i32) } else { WasmiValue::F32(WasmiF32::from_float(n.as_f64().unwrap_or(0.0) as f32)) }).collect())
+                                );
+                                
+                            match (module_id, function_name, wasm_args_res) {
+                                (Some(mid), Some(fname), Ok(args_vec)) => {
+                                    let exec_req = AetherExecutionRequest { 
+                                        module_id: mid,
+                                        function_name: fname,
+                                        arguments: args_vec,
+                                        gas_limit,
+                                        execution_context_did: originator_did_from_rpc.or_else(|| Some(node_app_pk_hex.clone())),
+                                    };
+                                    match aethercore_runtime::execute_module(exec_req, current_block_height_for_rpc_ops) {
+                                        Ok(exec_res) => {
+                                            let result_payload = json!({
+                                                "success": exec_res.success,
+                                                "output": exec_res.output_values.iter().map(|v| format!("{:?}", v)).collect::<Vec<String>>(),
+                                                "gas_consumed": exec_res.gas_consumed_total,
+                                                "logs": exec_res.logs,
+                                                "error": exec_res.error_message,
+                                            });
+                                            RpcResponse {id: resp_id, result: Some(result_payload), error: None}
+                                        }
+                                        Err(e) => RpcResponse {id:resp_id, result:None, error:Some(RpcError{code:-10, message:format!("AetherCore execution error: {}",e)})}
+                                    }
+                                }
+                                (_, _, Err(e)) => RpcResponse {id:resp_id, result:None, error:Some(RpcError{code:-32602, message:format!("Invalid 'args_json': {}",e)})},
+                                _ => RpcResponse {id:resp_id, result:None, error:Some(RpcError{code:-32602, message:"Missing module_id or function_name for execute_module_call".into()})}
+                            }
+                        }
+                    }
+                    _ => RpcResponse {id:resp_id, result:None, error:Some(RpcError{code:-32601, message:"Method not found".into()})}
                 };
-                if let Ok(resp_json) = serde_json::to_string(&response) {
-                    if writer.write_all(format!("{}\n", resp_json).as_bytes()).await.is_err() {
-                        error!("[Node:{}:RPC] Failed to send RPC response.", node_name_for_this_rpc_iter);
-                        break;
-                    }
-                    if writer.flush().await.is_err() {
-                        error!("[Node:{}:RPC] Failed to flush RPC response.", node_name_for_this_rpc_iter);
-                        break;
+                if let Ok(resp_j) = serde_json::to_string(&response) { 
+                    if writer.write_all(format!("{}\n", resp_j).as_bytes()).await.is_err() || writer.flush().await.is_err() {
+                        error!("[Node:{}:RPC] Send/Flush RPC response error.", node_name_handler); break;
                     }
                 } else {
-                    error!("[Node:{}:RPC] Failed to serialize RPC response.", node_name_for_this_rpc_iter);
+                    error!("[Node:{}:RPC] Serialize RPC response error.", node_name_handler);
                 }
             }
-            Err(e) => {
-                if e.kind() != std::io::ErrorKind::UnexpectedEof {
-                    error!("[Node:{}:RPC] Error reading RPC line: {}", node_name_handler, e);
-                }
-                break;
+            Err(e) => { 
+                if e.kind() != io::ErrorKind::UnexpectedEof { error!("[Node:{}:RPC] Read RPC line error: {}", node_name_handler, e); }
+                break; 
             }
         }
     }
-    debug!("[Node:{}:RPC] RPC connection handler finished for an address.", node_name_handler);
+     debug!("[Node:{}:RPC] RPC connection handler finished.", node_name_handler);
 }

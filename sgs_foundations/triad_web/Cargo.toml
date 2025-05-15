@@ -26,3 +26,5 @@ libp2p = { version = "0.53.2", features = [
     "macros", 
     "identify",
 ]}
+
+ecliptic_concordance = { path = "../ecliptic_concordance" }

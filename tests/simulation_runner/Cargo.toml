@@ -5,14 +5,12 @@ edition = "2021"
 
 [dependencies]
 serde_json = "1.0"
-semantic_synapse_interfaces = { path = "../../knowledge_nexus_isn/semantic_synapse_interfaces" }
 chronoforge_simulator = { path = "../../omniverse_reality_simulation/chronoforge_simulator" }
 eonmirror_interface = { path = "../../omniverse_reality_simulation/eonmirror_interface" }
-wasmi = "0.31.2"
+wasmi = "0.31.2" # For wasmi::Value
 cosmic_justice_enforcers = { path = "../../security_privacy_aegis/cosmic_justice_enforcers" }
 nebulashield_defenses = { path = "../../risk_mitigation/nebulashield_defenses" }
 nexus_cosmic_introspection_nci = { path = "../../ethical_oversight_ego/nexus_cosmic_introspection_nci" }
-primeaxiom_vault = { path = "../../ethical_oversight_ego/primeaxiom_vault" }
 astrocli_deployment_nexus = { path = "../../developer_ecosystem_astroforge/astrocli_deployment_nexus" }
 econova_incentives = { path = "../../governance_economy/econova_incentives" }
 gaiapulse_engine = { path = "../../astral_hyper_engines/cluster_beta_material_ecological/gaiapulse_engine" }
@@ -21,16 +19,16 @@ symbiotic_trust_lattice_stl = { path = "../../trust_obligation_stl_von/symbiotic
 soulstar_matrix_identity = { path = "../../astral_hyper_engines/cluster_alpha_economic_sovereign/soulstar_matrix_identity" }
 oraclesync_futarchy = { path = "../../governance_economy/oraclesync_futarchy" }
 starsenate_collectives_governance = { path = "../../astral_hyper_engines/cluster_alpha_economic_sovereign/starsenate_collectives_governance" }
-voidproof_engine_zkp = { path = "../../security_privacy_aegis/voidproof_engine_zkp" }
-celestial_synapse_network_csn = { path = "../../sgs_foundations/celestial_synapse_network_csn" }
 novavault_flux_finance = { path = "../../astral_hyper_engines/cluster_alpha_economic_sovereign/novavault_flux_finance" }
-# Workspace dependencies (these paths are relative to this Cargo.toml)
-nebula_pulse_swarm = { path = "../../sgs_foundations/triad_web/nebula_pulse_swarm" }
+nebula_pulse_swarm = { path = "../../sgs_foundations/triad_web/nebula_pulse_swarm" } 
 aethercore_runtime = { path = "../../sgs_foundations/aethercore_runtime" }
 ecliptic_concordance = { path = "../../sgs_foundations/ecliptic_concordance" }
 cosmic_data_constellation = { path = "../../knowledge_nexus_isn/cosmic_data_constellation" }
+semantic_synapse_interfaces = { path = "../../knowledge_nexus_isn/semantic_synapse_interfaces" } # RE-ADDED
 
-# Utility for hashing
-use_serde = { package = "serde", version = "1.0", features = ["derive"] } # Renaming to avoid conflict if serde is used directly
-sha2 = "0.10.8"
-hex = "0.4.3"
+# Utilities
+sha2 = "0.10.8" 
+hex = "0.4.3"    
+rand = "0.8" 
+ed25519-dalek = { version = "2.1.1", features = ["serde"] } 
+once_cell = "1.19.0" 
