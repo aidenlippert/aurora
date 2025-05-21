@@ -1,0 +1,13 @@
+{
+    "python.analysis.typeCheckingMode": "strict",
+    "python.analysis.extraPaths": [
+        "/home/punk/miniconda/envs/cess_env/lib/python3.11/site-packages",
+        // Add paths for other environments as they become active or if cross-env type checking is desired
+        "/home/punk/miniconda/envs/cto_env/lib/python3.11/site-packages",
+        "/home/punk/miniconda/envs/pqc_env/lib/python3.11/site-packages"
+    ],
+    // Optional: If 'extraPaths' doesn't fully resolve, sometimes setting a specific stub path helps,
+    // or enabling diagnostic mode for more info.
+    // "python.analysis.diagnosticMode": "workspace", // Can be useful for debugging Pylance issues
+    "python.analysis.autoImportCompletions": true
+}
